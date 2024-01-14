@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Temperature {
     pub value: f32,
 }
