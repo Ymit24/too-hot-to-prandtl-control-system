@@ -1,33 +1,14 @@
 use externals::{
-    event_logging::{adapters::EmitToLoggingAdapter, EventLoggingModule},
-    hardware::{
-        adapters::{EmitToHardwareAdapter, PollClientSensorAdapter},
-        HardwareModule,
-    },
-    host_sensors::HostSensorModule,
+    event_logging::EventLoggingModule, hardware::HardwareModule, host_sensors::HostSensorModule,
+    reporting_tool::ReportingToolModule,
 };
-use internals::core::{ports::ClientSensorPort, system::CoreSystem};
-
-use crate::{
-    externals::{
-        host::host_sensor_adapter::HostSensorAdapter, reporting_tool::ReportingToolModule,
-    },
-    internals::control_system::{app::Application, models::Temperature},
-};
+use internals::core::system::CoreSystem;
 
 pub mod externals;
 pub mod internals;
 pub mod models;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let raw_temp = 90f32;
-    let _cpu_temp = Temperature::try_from(raw_temp)?;
-
-    let hsp = HostSensorAdapter {};
-    let app = Application::new(hsp);
-
-    app.run()?;
-
     let HardwareModule {
         client_sensor_adapter,
         control_event_adapter: emit_to_hardware_adapter,
