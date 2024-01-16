@@ -22,14 +22,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hexagon_example"
-version = "0.1.0"
-dependencies = [
- "derive_more",
- "thiserror",
-]
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.76"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -102,6 +94,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.48",
+]
+
+[[package]]
+name = "too_hot_to_prandtl_control_system"
+version = "0.1.0"
+dependencies = [
+ "derive_more",
+ "thiserror",
 ]
 
 [[package]]
