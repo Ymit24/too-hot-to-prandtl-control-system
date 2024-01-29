@@ -19,7 +19,7 @@ pub trait HardwareService {
 
 pub trait HardwareMessage: Send {
     fn get_id(&self) -> u16;
-    fn serialize(&self) -> &[u8];
+    fn serialize(&self) -> Vec<u8>;
 }
 
 // example message
@@ -46,10 +46,9 @@ impl HardwareMessage for ControlMessage {
         self.mid
     }
 
-    fn serialize(&self) -> &[u8] {
+    fn serialize(&self) -> Vec<u8> {
         bincode::serialize(&self)
             .expect("Failed to serialize control message!")
-            .as_slice()
     }
 }
 
@@ -64,10 +63,9 @@ impl HardwareMessage for HeartbeatMessage {
         self.mid
     }
 
-    fn serialize(&self) -> &[u8] {
+    fn serialize(&self) -> Vec<u8> {
         bincode::serialize(&self)
             .expect("Failed to serialize heartbeat message!")
-            .as_slice()
     }
 }
 
@@ -101,10 +99,10 @@ impl HardwareServiceUsb {
         let mut communication = HardwareCommunication::new();
         communication.start();
 
-        Ok(Self {
+        Self {
             port,
             communication,
-        })
+        }
     }
 }
 

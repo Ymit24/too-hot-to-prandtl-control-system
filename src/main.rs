@@ -1,5 +1,5 @@
 use externals::{
-    event_logging::EventLoggingModule, hardware::HardwareModule, host_sensors::HostSensorModule,
+    event_logging::EventLoggingModule, hardware::{adapters::{PollClientSensorAdapter, EmitToHardwareAdapter}, services::HardwareServiceUsb}, host_sensors::HostSensorModule,
     reporting_tool::ReportingToolModule,
 };
 use internals::core::system::CoreSystem;
@@ -9,10 +9,10 @@ pub mod internals;
 pub mod models;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let HardwareModule {
-        client_sensor_adapter,
-        control_event_adapter: emit_to_hardware_adapter,
-    } = HardwareModule::initialize();
+    let hardware_usb_service = HardwareServiceUsb::new();
+    
+    let client_sensor_adapter = PollClientSensorAdapter::new(&hardware_usb_service);
+    let emit_to_hardware_adapter =  EmitToHardwareAdapter {};
 
     let EventLoggingModule {
         control_event_adapter: emit_to_logging_adapter,
