@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use super::{rpm::Rpm, voltage::Voltage};
 
-#[derive(Clone, Copy)]
+#[derive(Debug,Clone, Copy)]
 pub struct ControlEvent {
     pub fan_speed: Rpm<2300>, // NOTE: placeholder
     pub pump_pwm: Voltage<5>, // NOTE: placeholder

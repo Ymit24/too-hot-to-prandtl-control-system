@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use thiserror::Error;
 
-#[derive(Clone, Copy)]
+#[derive(Debug,Clone, Copy)]
 pub struct Voltage<const MAX: u8> {
     pub value: f32,
 }

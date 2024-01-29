@@ -1,42 +1,53 @@
-use externals::{
-    event_logging::EventLoggingModule, hardware::HardwareModule, host_sensors::HostSensorModule,
-    reporting_tool::ReportingToolModule,
-};
-use internals::core::system::CoreSystem;
-
 pub mod externals;
-pub mod internals;
 pub mod models;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let HardwareModule {
-        client_sensor_adapter,
-        control_event_adapter: emit_to_hardware_adapter,
-    } = HardwareModule::initialize();
+pub mod controls;
+pub mod system;
 
-    let EventLoggingModule {
-        control_event_adapter: emit_to_logging_adapter,
-    } = EventLoggingModule::initialize();
+use anyhow::Result;
+use system::task_core_system;
+use tokio::{signal, sync::broadcast};
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
+use tracing::level_filters::LevelFilter;
 
-    let HostSensorModule {
-        host_sensor_adapter,
-    } = HostSensorModule::initialize();
+#[tokio::main]
+async fn main() -> Result<()> {
+    let subscriber = tracing_subscriber::fmt()
+        .compact()
+        .with_file(true)
+        .with_line_number(true)
+        .with_thread_ids(true)
+        .with_target(false)
+        .with_max_level(LevelFilter::DEBUG)
+        .finish();
 
-    let ReportingToolModule {
-        tuning_adapter,
-        control_event_adapter: emit_to_reporting_tool,
-    } = ReportingToolModule::initialize();
+    tracing::subscriber::set_global_default(subscriber)?;
+    let tracker = TaskTracker::new();
 
-    let _core = CoreSystem::new(
-        client_sensor_adapter,
-        host_sensor_adapter,
-        tuning_adapter,
-        vec![
-            &emit_to_hardware_adapter,
-            &emit_to_logging_adapter,
-            &emit_to_reporting_tool,
-        ],
-    );
+    let token = CancellationToken::new();
+
+    let (_tx_client_sensor_data, rx_client_sensor_data) = broadcast::channel(32);
+    let (_tx_host_sensor_data, rx_host_sensor_data) = broadcast::channel(32);
+    let (tx_control_frame, _rx_control_frame) = broadcast::channel(32);
+
+    let token_clone = token.clone();
+    tracker.spawn(async {
+        task_core_system(
+            token_clone,
+            rx_client_sensor_data,
+            rx_host_sensor_data,
+            tx_control_frame,
+        )
+        .await
+    });
+
+    if let Err(e) = signal::ctrl_c().await {
+        tracing::error!("Failed to listen for ctrl_c. Error: {}", e);
+    }
+
+    token.cancel();
+    tracker.close();
+    tracker.wait().await;
 
     Ok(())
 }
