@@ -5,6 +5,9 @@ pub mod controls;
 pub mod system;
 
 use anyhow::Result;
+use externals::host_sensors::{
+    services::HostCpuTemperatureServiceActual, task::task_poll_host_sensors,
+};
 use system::task_core_system;
 use tokio::{signal, sync::broadcast};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
@@ -18,7 +21,7 @@ async fn main() -> Result<()> {
         .with_line_number(true)
         .with_thread_ids(true)
         .with_target(false)
-        .with_max_level(LevelFilter::DEBUG)
+        .with_max_level(LevelFilter::TRACE)
         .finish();
 
     tracing::subscriber::set_global_default(subscriber)?;
@@ -27,7 +30,7 @@ async fn main() -> Result<()> {
     let token = CancellationToken::new();
 
     let (_tx_client_sensor_data, rx_client_sensor_data) = broadcast::channel(32);
-    let (_tx_host_sensor_data, rx_host_sensor_data) = broadcast::channel(32);
+    let (tx_host_sensor_data, rx_host_sensor_data) = broadcast::channel(32);
     let (tx_control_frame, _rx_control_frame) = broadcast::channel(32);
 
     let token_clone = token.clone();
@@ -39,6 +42,12 @@ async fn main() -> Result<()> {
             tx_control_frame,
         )
         .await
+    });
+
+    let token_clone = token.clone();
+    let host_cpu_service = HostCpuTemperatureServiceActual;
+    tracker.spawn(async move {
+        task_poll_host_sensors(token_clone, &host_cpu_service, tx_host_sensor_data).await
     });
 
     if let Err(e) = signal::ctrl_c().await {

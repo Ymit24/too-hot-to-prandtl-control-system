@@ -1,6 +1,6 @@
 use tokio::sync::broadcast::{Receiver, Sender};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, instrument, warn};
+use tracing::{info, instrument, warn, trace, debug, error};
 
 use crate::models::{
     client_sensor_data::ClientSensorData, control_event::ControlEvent,
@@ -14,7 +14,7 @@ use super::{
 /// Task: Activate when a host or client sensor data is emitted.
 /// Generate a control frame when both a client and host data have been
 /// emitted which is updated everytime a host or client data are emitted.
-/// Can be canceled.
+/// Can be cancelled.
 #[tracing::instrument(skip_all)]
 pub async fn task_core_system(
     token: CancellationToken,
@@ -37,9 +37,11 @@ pub async fn task_core_system(
             },
             Ok(data) = rx_client_sensor_data.recv() => {
                 current_client_frame = Some(data);
+                trace!("Received client frame.");
             },
             Ok(data) = rx_host_sensor_data.recv() => {
                 current_host_frame = Some(data);
+                trace!("Received host frame.");
             }
         }
     }
@@ -53,14 +55,14 @@ async fn business_logic(
     current_host_frame: Option<HostSensorData>,
     tx_control_frame: &Sender<ControlEvent>,
 ) {
-    tracing::trace!("business logic");
+    trace!("Executing business logic.");
     if let Some(client) = current_client_frame {
         if let Some(host) = current_host_frame {
             let control_event = generate_control_frame(client, host);
             if let Err(e) = tx_control_frame.send(control_event) {
-                tracing::warn!("Failed to broadcast control frame. Error: {}", e);
+                error!("Failed to broadcast control frame. Error: {}", e);
             } else {
-                tracing::debug!("Sent a control frame.");
+                debug!("Sent a control frame.");
             }
         }
     }
