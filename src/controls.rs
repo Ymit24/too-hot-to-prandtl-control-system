@@ -7,7 +7,10 @@ pub fn generate_control_frame(
     client_sensor_data: ClientSensorData,
     host_sensor_data: HostSensorData,
 ) -> ControlEvent {
-    unimplemented!()
+    ControlEvent {
+        fan_speed: crate::models::rpm::Rpm { value: 1250 },
+        pump_pwm: crate::models::voltage::Voltage { value: 3.4f32 },
+    }
 }
 
 #[cfg(test)]

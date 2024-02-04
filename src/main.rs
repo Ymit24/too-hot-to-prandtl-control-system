@@ -5,8 +5,10 @@ pub mod controls;
 pub mod system;
 
 use anyhow::Result;
-use externals::host_sensors::{
-    services::HostCpuTemperatureServiceActual, task::task_poll_host_sensors,
+use externals::{
+    client_sensors::task::task_poll_client_sensors,
+    event_logging::task::task_control_event_logging,
+    host_sensors::{services::HostCpuTemperatureServiceActual, task::task_poll_host_sensors},
 };
 use system::task_core_system;
 use tokio::{signal, sync::broadcast};
@@ -29,9 +31,9 @@ async fn main() -> Result<()> {
 
     let token = CancellationToken::new();
 
-    let (_tx_client_sensor_data, rx_client_sensor_data) = broadcast::channel(32);
+    let (tx_client_sensor_data, rx_client_sensor_data) = broadcast::channel(32);
     let (tx_host_sensor_data, rx_host_sensor_data) = broadcast::channel(32);
-    let (tx_control_frame, _rx_control_frame) = broadcast::channel(32);
+    let (tx_control_frame, rx_control_frame) = broadcast::channel(32);
 
     let token_clone = token.clone();
     tracker.spawn(async {
@@ -50,11 +52,29 @@ async fn main() -> Result<()> {
         task_poll_host_sensors(token_clone, &host_cpu_service, tx_host_sensor_data).await
     });
 
-    if let Err(e) = signal::ctrl_c().await {
-        tracing::error!("Failed to listen for ctrl_c. Error: {}", e);
+    let token_clone = token.clone();
+    tracker.spawn(async { task_poll_client_sensors(token_clone, tx_client_sensor_data).await });
+
+    let token_clone = token.clone();
+    tracker.spawn(async { task_control_event_logging(token_clone, rx_control_frame).await });
+
+    let token_clone = token.clone();
+
+    tokio::select! {
+        _ = token_clone.cancelled() => {}
+        res = signal::ctrl_c() => {
+            match res {
+                Ok(_) => {
+                    token.cancel();
+                },
+                Err(e)=>{
+                    tracing::error!("Failed to listen for ctrl_c. Error: {}", e);
+                    token.cancel();
+                }
+            };
+        },
     }
 
-    token.cancel();
     tracker.close();
     tracker.wait().await;
 

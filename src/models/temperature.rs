@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
@@ -19,5 +21,11 @@ impl TryFrom<f32> for Temperature {
             return Err(TemperatureError::TooHigh);
         }
         Ok(Temperature { value })
+    }
+}
+
+impl Display for Temperature {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({} degC)", self.value)
     }
 }

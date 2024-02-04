@@ -1,11 +1,10 @@
 use std::time::Duration;
 
-use systemstat::Platform;
 use tokio::sync::broadcast::Sender;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 
-use crate::models::{host_sensor_data::HostSensorData, temperature::Temperature};
+use crate::models::host_sensor_data::HostSensorData;
 
 use super::services::HostCpuTemperatureService;
 
@@ -23,7 +22,7 @@ pub async fn task_poll_host_sensors(
 
         tokio::select! {
             _ = token.cancelled() => {
-                warn!("Canceled.");
+                warn!("Cancelled.");
                 break;
             },
             _ = tokio::time::sleep(Duration::from_millis(500)) => {}
@@ -47,7 +46,7 @@ async fn business_logic(
         }
     };
 
-    debug!("Got cpu temperature: {:?}", temperature_reading);
+    debug!("Got cpu temperature: {}", temperature_reading);
     let data = HostSensorData {
         cpu_temperature: temperature_reading,
     };
