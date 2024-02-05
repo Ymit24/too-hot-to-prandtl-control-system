@@ -45,6 +45,19 @@ impl ClientHardwareFSM {
         }
     }
 
+    /// Spawn the tasks required to operate this module.
+    /// Internally handles states, cancellations, and cleanup.  
+    pub fn spawn(
+        &mut self,
+        token: CancellationToken,
+        tx_client_sensor_data: Sender<ClientSensorData>,
+    ) {
+        self.tasks.spawn(async {
+            self.task_client_sensor_fsm(token, tx_client_sensor_data)
+                .await
+        });
+    }
+
     #[tracing::instrument(skip_all)]
     async fn switch_state(&mut self, new_state: State) {
         // 1. Shutdown existing tasks by cancelling their state token
@@ -85,7 +98,7 @@ impl ClientHardwareFSM {
 
             let processed_ports: Vec<(SerialPortInfo, bool)> = tokio_stream::iter(ports)
                 .then(|port| async {
-                    Self::try_request_connection_for_port(self.state_token.clone(), port)
+                    try_request_connection_for_port(self.state_token.clone(), port)
                 })
                 .buffered(5)
                 .collect()
@@ -124,18 +137,71 @@ impl ClientHardwareFSM {
             }
         }
     }
+}
 
-    /// Try and open communication with a port, send a request communication packet,
-    /// and receive an accept communication packet response. Returns true if all of these steps
-    /// pass and false if any of them fail.
-    async fn try_request_connection_for_port(
-        token: CancellationToken,
-        port: SerialPortInfo,
-    ) -> (SerialPortInfo, bool) {
-        (port, false)
+/// Try and open communication with a port, send a request communication packet,
+/// and receive an accept communication packet response. Returns true if all of these steps
+/// pass and false if any of them fail.
+async fn try_request_connection_for_port(
+    token: CancellationToken,
+    port: SerialPortInfo,
+) -> (SerialPortInfo, bool) {
+    (port, false)
+}
+
+// NOTE: MAYBE DON'T RETURN A STRING
+async fn find_client_port(token: CancellationToken) -> Option<String> {
+    let ports = match serialport::available_ports() {
+        Err(e) => {
+            error!("Failed to get any ports! Error: {}", e);
+            return None;
+        }
+        Ok(ports) => ports,
+    };
+    let processed_ports: Vec<(SerialPortInfo, bool)> = tokio_stream::iter(ports)
+        .then(|port| async { try_request_connection_for_port(token.clone(), port) })
+        .buffered(5)
+        .collect()
+        .await;
+    if processed_ports.is_empty() {
+        warn!("Didn't find any candidate ports!");
+        return None;
+    }
+    let candidate_ports: Vec<SerialPortInfo> = processed_ports
+        .into_iter()
+        .filter(|x| x.1 == true)
+        .map(|x| x.0)
+        .collect();
+
+    let first_candidate_port = match candidate_ports.first() {
+        None => {
+            warn!("No available ports which responded to connection attempt successfully!");
+            return None;
+        }
+        Some(candidate_port) => candidate_port,
+    };
+
+    info!(
+        "Found candidate port which successfully responded to connection attempt. Name: {}",
+        first_candidate_port.port_name
+    );
+
+    Some(first_candidate_port.port_name.clone())
+}
+
+async fn wait_for_client_port(token: CancellationToken) -> Result<String, String> {
+    loop {
+        if token.is_cancelled() {
+            return Err(String::from("Canceled"));
+        }
+        match find_client_port(token.clone()).await {
+            Some(port_name) => return Ok(port_name),
+            None => continue,
+        };
     }
 }
 
+// NOTE: STILL NEED TO HANDLE THE 'NEVER GIVE UP' CONCEPT.
 #[tracing::instrument(skip_all)]
 pub async fn task_poll_client_sensors(
     token: CancellationToken,
@@ -143,8 +209,17 @@ pub async fn task_poll_client_sensors(
 ) {
     info!("Started.");
 
-    // TODO: DON'T HARDCODE THE PORT
-    let mut port = match serialport::new("/dev/ttyACM3", 9600)
+    let port_name = match wait_for_client_port(token.clone()).await {
+        Err(e) => {
+            warn!("Failed to wait for a client port. Cancelling. Error: {}", e);
+            token.cancel();
+            return;
+        }
+        Ok(port_name) => port_name,
+    };
+
+    // NOTE: MIGHT NOT NEED FORMATTING, THE PORT NAME MIGHT FULLY CONTAIN THE PATH.
+    let mut port = match serialport::new(format!("/dev/{}", port_name), 9600)
         .timeout(Duration::from_millis(2500))
         .open()
     {

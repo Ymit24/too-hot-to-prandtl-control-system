@@ -62,13 +62,9 @@ async fn main() -> Result<()> {
     let token_clone = token.clone();
     let tx_client_sensor_data_clone = tx_client_sensor_data.clone();
     let mut client_fsm = ClientHardwareFSM::new();
-    // TODO: SPAWN THIS FROM WITHIN THE FSM, THE FSM SHOULD 'OWN' ITS OWN TASKS TO AVOID BORROW
-    // CHECKER ISSUES.
-    tracker.spawn(async {
-        client_fsm
-            .task_client_sensor_fsm(token_clone, tx_client_sensor_data_clone)
-            .await
-    });
+    // This is a synchronous function which kicks off tasks that are self
+    // managed by the FSM module.
+    client_fsm.spawn(token_clone, tx_client_sensor_data_clone);
 
     let token_clone = token.clone();
     tracker.spawn(async { task_control_event_logging(token_clone, rx_control_frame).await });
