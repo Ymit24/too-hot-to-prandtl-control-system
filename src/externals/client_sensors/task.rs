@@ -4,7 +4,7 @@ use tokio::sync::broadcast::Sender;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use crate::models::client_sensor_data::{self, ClientSensorData};
+use crate::models::client_sensor_data::ClientSensorData;
 
 #[tracing::instrument(skip_all)]
 pub async fn task_poll_client_sensors(
@@ -13,6 +13,7 @@ pub async fn task_poll_client_sensors(
 ) {
     info!("Started.");
 
+    // TODO: DON'T HARDCODE THE PORT
     let mut port = match serialport::new("/dev/ttyACM3", 9600)
         .timeout(Duration::from_millis(2500))
         .open()
