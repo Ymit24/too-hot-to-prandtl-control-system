@@ -1,10 +1,140 @@
-use serialport::SerialPort;
+use futures::{Future, StreamExt};
+use serialport::{SerialPort, SerialPortInfo};
 use std::time::Duration;
-use tokio::sync::broadcast::Sender;
-use tokio_util::sync::CancellationToken;
+use tokio::{select, sync::broadcast::Sender};
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::models::client_sensor_data::ClientSensorData;
+
+pub enum State {
+    Passive,
+    Active,
+}
+
+/// Client Sensor FSM
+pub struct ClientHardwareFSM {
+    state: State,
+    tasks: TaskTracker,
+    state_token: CancellationToken,
+}
+
+impl ClientHardwareFSM {
+    pub fn new() -> Self {
+        Self {
+            state: State::Passive,
+            tasks: TaskTracker::new(),
+            state_token: CancellationToken::new(),
+        }
+    }
+
+    #[instrument(skip_all)]
+    pub async fn task_client_sensor_fsm(
+        &mut self,
+        token: CancellationToken,
+        tx_client_sensor_data: Sender<ClientSensorData>,
+    ) {
+        info!("Started FSM.");
+        loop {
+            select! {
+                _ = token.cancelled() => {
+                    warn!("Canceled.");
+                    break;
+                }
+            }
+        }
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn switch_state(&mut self, new_state: State) {
+        // 1. Shutdown existing tasks by cancelling their state token
+        self.state_token.cancel();
+        self.tasks.close();
+        self.tasks.wait().await;
+
+        // 1b. Create new cancel token
+        self.state_token = CancellationToken::new();
+
+        // 2. Start up new tasks
+        match new_state {
+            State::Passive => {
+                // 3a. Spawn tasks for passive mode
+            }
+            State::Active => {
+                // 3b. Spawn tasks for active mode
+            }
+        }
+        // 4. Update state
+        self.state = new_state;
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn task_find_client_port(&mut self, tx_state_change: Sender<State>) {
+        loop {
+            if self.state_token.is_cancelled() {
+                info!("Task cancelled.");
+                break; // NOTE: This ends the task
+            }
+            let ports = match serialport::available_ports() {
+                Err(e) => {
+                    error!("Failed to get any ports! Error: {}", e);
+                    continue;
+                }
+                Ok(ports) => ports,
+            };
+
+            let processed_ports: Vec<(SerialPortInfo, bool)> = tokio_stream::iter(ports)
+                .then(|port| async {
+                    Self::try_request_connection_for_port(self.state_token.clone(), port)
+                })
+                .buffered(5)
+                .collect()
+                .await;
+            if processed_ports.is_empty() {
+                warn!("Didn't find any candidate ports!");
+                continue;
+            }
+            let candidate_ports: Vec<SerialPortInfo> = processed_ports
+                .into_iter()
+                .filter(|x| x.1 == true)
+                .map(|x| x.0)
+                .collect();
+
+            let first_candidate_port = match candidate_ports.first() {
+                None => {
+                    warn!("No available ports which responded to connection attempt successfully!");
+                    continue;
+                }
+                Some(candidate_port) => candidate_port,
+            };
+
+            info!(
+                "Found candidate port which successfully responded to connection attempt. Name: {}",
+                first_candidate_port.port_name
+            );
+            match tx_state_change.send(State::Active) {
+                Err(e) => {
+                    error!("Failed to send state change request. Error: {}", e);
+                    continue;
+                }
+                Ok(_) => {
+                    trace!("Successfully sent state change request.");
+                    break; // NOTE: This ends the task.
+                }
+            }
+        }
+    }
+
+    /// Try and open communication with a port, send a request communication packet,
+    /// and receive an accept communication packet response. Returns true if all of these steps
+    /// pass and false if any of them fail.
+    async fn try_request_connection_for_port(
+        token: CancellationToken,
+        port: SerialPortInfo,
+    ) -> (SerialPortInfo, bool) {
+        (port, false)
+    }
+}
 
 #[tracing::instrument(skip_all)]
 pub async fn task_poll_client_sensors(

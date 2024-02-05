@@ -15,6 +15,8 @@ use tokio::{signal, sync::broadcast};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tracing::level_filters::LevelFilter;
 
+use crate::externals::client_sensors::task::ClientHardwareFSM;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let subscriber = tracing_subscriber::fmt()
@@ -53,7 +55,20 @@ async fn main() -> Result<()> {
     });
 
     let token_clone = token.clone();
-    tracker.spawn(async { task_poll_client_sensors(token_clone, tx_client_sensor_data).await });
+    let tx_client_sensor_data_clone = tx_client_sensor_data.clone();
+    tracker
+        .spawn(async { task_poll_client_sensors(token_clone, tx_client_sensor_data_clone).await });
+
+    let token_clone = token.clone();
+    let tx_client_sensor_data_clone = tx_client_sensor_data.clone();
+    let mut client_fsm = ClientHardwareFSM::new();
+    // TODO: SPAWN THIS FROM WITHIN THE FSM, THE FSM SHOULD 'OWN' ITS OWN TASKS TO AVOID BORROW
+    // CHECKER ISSUES.
+    tracker.spawn(async {
+        client_fsm
+            .task_client_sensor_fsm(token_clone, tx_client_sensor_data_clone)
+            .await
+    });
 
     let token_clone = token.clone();
     tracker.spawn(async { task_control_event_logging(token_clone, rx_control_frame).await });
