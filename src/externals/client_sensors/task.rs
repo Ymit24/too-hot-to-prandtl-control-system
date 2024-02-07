@@ -1,143 +1,18 @@
-use futures::{Future, StreamExt};
+use anyhow::Result;
+use futures::StreamExt;
 use serialport::{SerialPort, SerialPortInfo};
 use std::time::Duration;
-use tokio::{select, sync::broadcast::Sender};
+use tokio::{
+    select,
+    sync::broadcast::{Receiver, Sender},
+};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tracing::{debug, error, info, instrument, trace, warn};
 
-use crate::models::client_sensor_data::ClientSensorData;
-
-pub enum State {
-    Passive,
-    Active,
-}
-
-/// Client Sensor FSM
-pub struct ClientHardwareFSM {
-    state: State,
-    tasks: TaskTracker,
-    state_token: CancellationToken,
-}
-
-impl ClientHardwareFSM {
-    pub fn new() -> Self {
-        Self {
-            state: State::Passive,
-            tasks: TaskTracker::new(),
-            state_token: CancellationToken::new(),
-        }
-    }
-
-    #[instrument(skip_all)]
-    pub async fn task_client_sensor_fsm(
-        &mut self,
-        token: CancellationToken,
-        tx_client_sensor_data: Sender<ClientSensorData>,
-    ) {
-        info!("Started FSM.");
-        loop {
-            select! {
-                _ = token.cancelled() => {
-                    warn!("Canceled.");
-                    break;
-                }
-            }
-        }
-    }
-
-    /// Spawn the tasks required to operate this module.
-    /// Internally handles states, cancellations, and cleanup.  
-    pub fn spawn(
-        &mut self,
-        token: CancellationToken,
-        tx_client_sensor_data: Sender<ClientSensorData>,
-    ) {
-        self.tasks.spawn(async {
-            self.task_client_sensor_fsm(token, tx_client_sensor_data)
-                .await
-        });
-    }
-
-    #[tracing::instrument(skip_all)]
-    async fn switch_state(&mut self, new_state: State) {
-        // 1. Shutdown existing tasks by cancelling their state token
-        self.state_token.cancel();
-        self.tasks.close();
-        self.tasks.wait().await;
-
-        // 1b. Create new cancel token
-        self.state_token = CancellationToken::new();
-
-        // 2. Start up new tasks
-        match new_state {
-            State::Passive => {
-                // 3a. Spawn tasks for passive mode
-            }
-            State::Active => {
-                // 3b. Spawn tasks for active mode
-            }
-        }
-        // 4. Update state
-        self.state = new_state;
-    }
-
-    #[tracing::instrument(skip_all)]
-    pub async fn task_find_client_port(&mut self, tx_state_change: Sender<State>) {
-        loop {
-            if self.state_token.is_cancelled() {
-                info!("Task cancelled.");
-                break; // NOTE: This ends the task
-            }
-            let ports = match serialport::available_ports() {
-                Err(e) => {
-                    error!("Failed to get any ports! Error: {}", e);
-                    continue;
-                }
-                Ok(ports) => ports,
-            };
-
-            let processed_ports: Vec<(SerialPortInfo, bool)> = tokio_stream::iter(ports)
-                .then(|port| async {
-                    try_request_connection_for_port(self.state_token.clone(), port)
-                })
-                .buffered(5)
-                .collect()
-                .await;
-            if processed_ports.is_empty() {
-                warn!("Didn't find any candidate ports!");
-                continue;
-            }
-            let candidate_ports: Vec<SerialPortInfo> = processed_ports
-                .into_iter()
-                .filter(|x| x.1 == true)
-                .map(|x| x.0)
-                .collect();
-
-            let first_candidate_port = match candidate_ports.first() {
-                None => {
-                    warn!("No available ports which responded to connection attempt successfully!");
-                    continue;
-                }
-                Some(candidate_port) => candidate_port,
-            };
-
-            info!(
-                "Found candidate port which successfully responded to connection attempt. Name: {}",
-                first_candidate_port.port_name
-            );
-            match tx_state_change.send(State::Active) {
-                Err(e) => {
-                    error!("Failed to send state change request. Error: {}", e);
-                    continue;
-                }
-                Ok(_) => {
-                    trace!("Successfully sent state change request.");
-                    break; // NOTE: This ends the task.
-                }
-            }
-        }
-    }
-}
+use crate::models::{
+    client_sensor_data::{self, ClientSensorData},
+    packet::Packet,
+};
 
 /// Try and open communication with a port, send a request communication packet,
 /// and receive an accept communication packet response. Returns true if all of these steps
@@ -146,6 +21,9 @@ async fn try_request_connection_for_port(
     token: CancellationToken,
     port: SerialPortInfo,
 ) -> (SerialPortInfo, bool) {
+    if token.is_cancelled() {
+        return (port, false);
+    }
     (port, false)
 }
 
@@ -201,18 +79,24 @@ async fn wait_for_client_port(token: CancellationToken) -> Result<String, String
     }
 }
 
-// NOTE: STILL NEED TO HANDLE THE 'NEVER GIVE UP' CONCEPT.
+/// This task handles finding, opening, and sending/receiving packets with
+/// the embedded hardware. This task polls to determine when packets are available
+/// to read. If not currently reading, it will send packets as they're queued for
+/// sending. If communication is lost the task will restart.
 #[tracing::instrument(skip_all)]
-pub async fn task_poll_client_sensors(
+pub async fn task_handle_client_communication(
     token: CancellationToken,
-    tx_client_sensor_data: Sender<ClientSensorData>,
+    tx_packets: Sender<Packet>,
 ) {
     info!("Started.");
 
     let port_name = match wait_for_client_port(token.clone()).await {
         Err(e) => {
             warn!("Failed to wait for a client port. Cancelling. Error: {}", e);
-            token.cancel();
+            // NOTE: MIGHT NOT NEED THIS CHECK.
+            if !token.is_cancelled() {
+                token.cancel();
+            }
             return;
         }
         Ok(port_name) => port_name,
@@ -232,24 +116,15 @@ pub async fn task_poll_client_sensors(
     };
 
     loop {
-        let client_sensor_data = ClientSensorData {
-            pump_speed: crate::models::rpm::Rpm { value: 1000 },
-        };
-
         let packets = read_packets_from_port(&mut port);
 
         for packet in packets {
-            debug!(
-                "Control Packet: Type={},Data={},Command={}",
-                packet.type_id, packet.data, packet.command
-            );
-        }
+            debug!("Received Communication Packet: {:?}", packet);
 
-        debug!("Got client sensor data: {}", client_sensor_data);
-        if let Err(e) = tx_client_sensor_data.send(client_sensor_data) {
-            error!("Failed to send client sensor data. Error: {}", e);
-        } else {
-            debug!("Sent a client sensor data message.");
+            match tx_packets.send(packet) {
+                Err(e) => warn!("Failed to send packet over queue. Error: {}", e),
+                Ok(_) => trace!("Successfully sent packet over queue."),
+            }
         }
 
         tokio::select! {
@@ -260,6 +135,67 @@ pub async fn task_poll_client_sensors(
             _ = tokio::time::sleep(Duration::from_millis(500)) => {}
         };
     }
+}
+
+/// Listens for incoming client messages. Will convert `ReportSensors` messages
+/// into `ClientSensorData` models and transmit them.
+#[tracing::instrument(skip_all)]
+pub async fn task_process_client_sensor_packets(
+    token: CancellationToken,
+    tx_client_sensor_data: Sender<ClientSensorData>,
+    mut rx_packet: Receiver<Packet>,
+) {
+    info!("Started.");
+
+    loop {
+        tokio::select! {
+            _ = token.cancelled() => {
+                warn!("Cancelled.");
+                break;
+            },
+            Ok(data) = rx_packet.recv() => {
+                // NOTE: MIGHT BE SUFFICIENT/PREFERRED TO CLONE THE TX SENDER RATHER
+                // RATHER THAN SEND A REF.
+                handle_report_sensor_packet(data, &tx_client_sensor_data);
+            },
+        };
+    }
+}
+
+/// Handle the processing for any incoming client packets.
+/// Will only respond to `ReportSensors` type.
+/// Will return an error if the `ReportSensors` packet failed to be converted
+/// to a `ClientSensorData` or if it failed to be sent over `tx_client_sensor_data`.
+/// If it returns an error, the underlying error will be returned.
+/// Returns `Ok(())` if either the packet wasn't of type `ReportSensors` or if
+/// it was able to successfully generate a `ClientSensorData` and send it.
+fn handle_report_sensor_packet(
+    packet: Packet,
+    tx_client_sensor_data: &Sender<ClientSensorData>,
+) -> Result<()> {
+    match packet {
+        Packet::ReportSensors(packet) => {
+            trace!("Received report sensor packet: {:?}", packet);
+            let client_sensor_data = match ClientSensorData::try_from(packet) {
+                Err(e) => {
+                    return Err(e.into());
+                }
+                Ok(data) => data,
+            };
+
+            trace!("Got a client sensor data packet converted.");
+            if let Err(e) = tx_client_sensor_data.send(client_sensor_data) {
+                return Err(e.into());
+            }
+            debug!(
+                "Sent a client sensor data message. Message: {}",
+                client_sensor_data
+            );
+        }
+        _ => { /* NOTE: NOT INTERESTED IN OTHER PACKET TYPES HERE. */ }
+    }
+
+    Ok(())
 }
 
 #[instrument(skip_all)]
@@ -280,7 +216,7 @@ fn is_ready_to_read_from_port(port: &Box<dyn SerialPort>) -> bool {
 }
 
 #[instrument(skip_all)]
-fn read_packets_from_port(port: &mut Box<dyn SerialPort>) -> Vec<ControlPacket> {
+fn read_packets_from_port(port: &mut Box<dyn SerialPort>) -> Vec<Packet> {
     if !is_ready_to_read_from_port(port) {
         trace!("Not ready to read yet.");
         return vec![];
@@ -302,14 +238,7 @@ fn read_packets_from_port(port: &mut Box<dyn SerialPort>) -> Vec<ControlPacket> 
                 remaining_bytes.len()
             );
 
-            return packets
-                .into_iter()
-                .map(|raw| ControlPacket {
-                    type_id: raw.type_id,
-                    data: String::from(raw.data),
-                    command: raw.command,
-                })
-                .collect();
+            return packets;
         }
         Err(e) => {
             warn!("Failed to read from port. Error: {}", e);
@@ -318,6 +247,7 @@ fn read_packets_from_port(port: &mut Box<dyn SerialPort>) -> Vec<ControlPacket> 
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
 struct ControlPacket {
     type_id: u8,
     data: String,
@@ -326,7 +256,7 @@ struct ControlPacket {
 
 // TODO: MOVE THIS TO PROPER PACKET MODEL
 #[derive(serde::Serialize, serde::Deserialize)]
-struct Packet<'a> {
+struct PacketLocal<'a> {
     type_id: u8,
     data: &'a str,
     command: bool,

@@ -6,7 +6,6 @@ pub mod system;
 
 use anyhow::Result;
 use externals::{
-    client_sensors::task::task_poll_client_sensors,
     event_logging::task::task_control_event_logging,
     host_sensors::{services::HostCpuTemperatureServiceActual, task::task_poll_host_sensors},
 };
@@ -15,7 +14,9 @@ use tokio::{signal, sync::broadcast};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tracing::level_filters::LevelFilter;
 
-use crate::externals::client_sensors::task::ClientHardwareFSM;
+use crate::externals::client_sensors::task::{
+    task_handle_client_communication, task_process_client_sensor_packets,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -36,6 +37,7 @@ async fn main() -> Result<()> {
     let (tx_client_sensor_data, rx_client_sensor_data) = broadcast::channel(32);
     let (tx_host_sensor_data, rx_host_sensor_data) = broadcast::channel(32);
     let (tx_control_frame, rx_control_frame) = broadcast::channel(32);
+    let (tx_packets, rx_packets) = broadcast::channel(32);
 
     let token_clone = token.clone();
     tracker.spawn(async {
@@ -55,16 +57,17 @@ async fn main() -> Result<()> {
     });
 
     let token_clone = token.clone();
-    let tx_client_sensor_data_clone = tx_client_sensor_data.clone();
-    tracker
-        .spawn(async { task_poll_client_sensors(token_clone, tx_client_sensor_data_clone).await });
+    tracker.spawn(async { task_handle_client_communication(token_clone, tx_packets).await });
 
     let token_clone = token.clone();
     let tx_client_sensor_data_clone = tx_client_sensor_data.clone();
-    let mut client_fsm = ClientHardwareFSM::new();
-    // This is a synchronous function which kicks off tasks that are self
-    // managed by the FSM module.
-    client_fsm.spawn(token_clone, tx_client_sensor_data_clone);
+    tracker.spawn(async {
+        task_process_client_sensor_packets(token_clone, tx_client_sensor_data_clone, rx_packets)
+            .await
+    });
+
+    let token_clone = token.clone();
+    let tx_client_sensor_data_clone = tx_client_sensor_data.clone();
 
     let token_clone = token.clone();
     tracker.spawn(async { task_control_event_logging(token_clone, rx_control_frame).await });
