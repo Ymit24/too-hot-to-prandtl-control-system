@@ -74,3 +74,20 @@ pub struct ReportControlTargetsPacket {
     /// Sending the state which the valve is in results in nothing happening.
     valve_control_state: bool,
 }
+
+impl RequestConnectionPacket {
+    /// Used to create an instance of this struct.
+    /// Sets the `special_pattern` to a known value.
+    pub fn new() -> Self {
+        Self {
+            // TODO: DOUBLE CHECK THIS (is *b"..." okay)
+            special_pattern: *b"ab2dwask",
+        }
+    }
+
+    /// Used to create a new instance of this struct wrapped in a packet.
+    /// Typically what will be used.
+    pub fn new_packet() -> Packet {
+        Packet::RequestConnection(Self::new())
+    }
+}

@@ -11,8 +11,11 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::models::{
     client_sensor_data::{self, ClientSensorData},
-    packet::Packet,
+    packet::{Packet, RequestConnectionPacket},
 };
+
+const PRODUCT_NAME: &str = "Too Hot To Prandtl Controller";
+const SERIAL_NUMBER: &str = "1324";
 
 /// Try and open communication with a port, send a request communication packet,
 /// and receive an accept communication packet response. Returns true if all of these steps
@@ -24,6 +27,76 @@ async fn try_request_connection_for_port(token: CancellationToken, port: SerialP
         return false;
     }
     trace!("Checking port '{}'.", port.port_name);
+
+    match port.port_type {
+        serialport::SerialPortType::UsbPort(usb_info) => {
+            if let Some(serial_number) = usb_info.serial_number {
+                if serial_number != SERIAL_NUMBER {
+                    debug!("Wrong serial number!");
+                    return false;
+                }
+            } else {
+                debug!("Failed to get serial number from port.");
+                return false;
+            }
+            if let Some(product_name) = usb_info.product {
+                if product_name != PRODUCT_NAME {
+                    debug!("Wrong product name!");
+                    return false;
+                }
+            } else {
+                debug!("Failed to get product name from port.");
+                return false;
+            }
+        }
+        _ => {
+            debug!("Wrong port type.");
+            return false;
+        }
+    }
+    return true;
+
+    // 1. Open port
+    // 2. Write packet
+    // 3. Wait for packet with timeout
+    // 4. Process packet
+    // 5. Return true or false depending on outcome
+
+    let port_name = port.port_name.clone();
+    let mut port = match serialport::new(port_name.clone(), 9600)
+        .timeout(Duration::from_millis(5000))
+        .open()
+    {
+        Err(e) => {
+            info!("Failed to open port to {}. Error: {}.", port_name, e);
+            return false;
+        }
+        Ok(port) => {
+            debug!("Successfully opened connection to port {}", port_name);
+            port
+        }
+    };
+
+    let request_connection = RequestConnectionPacket::new_packet();
+
+    match postcard::to_vec::<Packet, 32>(&request_connection) {
+        Err(e) => {
+            warn!("Failed to serialize packet! Error: {}", e);
+            return false;
+        }
+        Ok(buf) => {
+            match port.write(buf.as_slice()) {
+                Err(e) => {
+                    warn!("Failed to write serialized packet into port!. Error: {}", e);
+                    return false;
+                }
+                Ok(bytes_written) => {
+                    debug!("Successfully wrote {} bytes into port.", bytes_written);
+                }
+            };
+        }
+    };
+
     false
 }
 
@@ -103,8 +176,7 @@ pub async fn task_handle_client_communication(
     };
     info!("Found a client port! Name: {}", port_name);
 
-    // NOTE: MIGHT NOT NEED FORMATTING, THE PORT NAME MIGHT FULLY CONTAIN THE PATH.
-    let mut port = match serialport::new(format!("/dev/{}", port_name), 9600)
+    let mut port = match serialport::new(port_name, 9600)
         .timeout(Duration::from_millis(2500))
         .open()
     {
