@@ -57,7 +57,9 @@ async fn main() -> Result<()> {
     });
 
     let token_clone = token.clone();
-    tracker.spawn(async { task_handle_client_communication(token_clone, tx_packets).await });
+    tracker.spawn(async {
+        task_handle_client_communication(token_clone, tx_packets).await;
+    });
 
     let token_clone = token.clone();
     let tx_client_sensor_data_clone = tx_client_sensor_data.clone();

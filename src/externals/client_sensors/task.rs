@@ -17,17 +17,18 @@ use crate::models::{
 /// Try and open communication with a port, send a request communication packet,
 /// and receive an accept communication packet response. Returns true if all of these steps
 /// pass and false if any of them fail.
-async fn try_request_connection_for_port(
-    token: CancellationToken,
-    port: SerialPortInfo,
-) -> (SerialPortInfo, bool) {
+#[instrument(skip_all)]
+async fn try_request_connection_for_port(token: CancellationToken, port: SerialPortInfo) -> bool {
     if token.is_cancelled() {
-        return (port, false);
+        warn!("Trying to request connection for a port but the token is cancelled. Aborting.");
+        return false;
     }
-    (port, false)
+    trace!("Checking port '{}'.", port.port_name);
+    false
 }
 
 // NOTE: MAYBE DON'T RETURN A STRING
+#[instrument(skip_all)]
 async fn find_client_port(token: CancellationToken) -> Option<String> {
     let ports = match serialport::available_ports() {
         Err(e) => {
@@ -36,46 +37,44 @@ async fn find_client_port(token: CancellationToken) -> Option<String> {
         }
         Ok(ports) => ports,
     };
-    let processed_ports: Vec<(SerialPortInfo, bool)> = tokio_stream::iter(ports)
-        .then(|port| async { try_request_connection_for_port(token.clone(), port) })
-        .buffered(5)
-        .collect()
-        .await;
-    if processed_ports.is_empty() {
-        warn!("Didn't find any candidate ports!");
-        return None;
+
+    trace!("Found {} ports to check.", ports.len());
+
+    let mut tasks = Vec::new();
+    for port in ports {
+        let task = try_request_connection_for_port(token.clone(), port.clone());
+        tasks.push(async move {
+            if task.await == true {
+                debug!("Found a port! Name: {}", port.port_name);
+                return Some(port.clone());
+            }
+            None
+        });
     }
-    let candidate_ports: Vec<SerialPortInfo> = processed_ports
+
+    let results = futures::future::join_all(tasks).await;
+
+    return results
         .into_iter()
-        .filter(|x| x.1 == true)
-        .map(|x| x.0)
-        .collect();
-
-    let first_candidate_port = match candidate_ports.first() {
-        None => {
-            warn!("No available ports which responded to connection attempt successfully!");
-            return None;
-        }
-        Some(candidate_port) => candidate_port,
-    };
-
-    info!(
-        "Found candidate port which successfully responded to connection attempt. Name: {}",
-        first_candidate_port.port_name
-    );
-
-    Some(first_candidate_port.port_name.clone())
+        .filter_map(|x| x)
+        .collect::<Vec<_>>()
+        .first()
+        .map(|x| x.port_name.clone());
 }
 
+#[instrument(skip_all)]
 async fn wait_for_client_port(token: CancellationToken) -> Result<String, String> {
     loop {
         if token.is_cancelled() {
+            warn!("Token was cancelled.");
             return Err(String::from("Canceled"));
         }
-        match find_client_port(token.clone()).await {
-            Some(port_name) => return Ok(port_name),
-            None => continue,
-        };
+        trace!("Looking for client port.");
+        if let Some(port_name) = find_client_port(token.clone()).await {
+            return Ok(port_name);
+        }
+        trace!("Sleeping briefly before checking again.");
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
 
@@ -90,6 +89,7 @@ pub async fn task_handle_client_communication(
 ) {
     info!("Started.");
 
+    trace!("Waiting on client port to be identified.");
     let port_name = match wait_for_client_port(token.clone()).await {
         Err(e) => {
             warn!("Failed to wait for a client port. Cancelling. Error: {}", e);
@@ -101,6 +101,7 @@ pub async fn task_handle_client_communication(
         }
         Ok(port_name) => port_name,
     };
+    info!("Found a client port! Name: {}", port_name);
 
     // NOTE: MIGHT NOT NEED FORMATTING, THE PORT NAME MIGHT FULLY CONTAIN THE PATH.
     let mut port = match serialport::new(format!("/dev/{}", port_name), 9600)
