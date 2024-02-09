@@ -17,11 +17,10 @@ use crate::models::{
 const PRODUCT_NAME: &str = "Too Hot To Prandtl Controller";
 const SERIAL_NUMBER: &str = "1324";
 
-/// Try and open communication with a port, send a request communication packet,
-/// and receive an accept communication packet response. Returns true if all of these steps
-/// pass and false if any of them fail.
+/// Check if a port is for the embedded hardware.
+/// Checks both the serial number and product name of the port.
 #[instrument(skip_all)]
-async fn try_request_connection_for_port(token: CancellationToken, port: SerialPortInfo) -> bool {
+fn is_port_for_embedded_hardware(token: CancellationToken, port: SerialPortInfo) -> bool {
     if token.is_cancelled() {
         warn!("Trying to request connection for a port but the token is cancelled. Aborting.");
         return false;
@@ -54,55 +53,13 @@ async fn try_request_connection_for_port(token: CancellationToken, port: SerialP
             return false;
         }
     }
-    return true;
-
-    // 1. Open port
-    // 2. Write packet
-    // 3. Wait for packet with timeout
-    // 4. Process packet
-    // 5. Return true or false depending on outcome
-
-    let port_name = port.port_name.clone();
-    let mut port = match serialport::new(port_name.clone(), 9600)
-        .timeout(Duration::from_millis(5000))
-        .open()
-    {
-        Err(e) => {
-            info!("Failed to open port to {}. Error: {}.", port_name, e);
-            return false;
-        }
-        Ok(port) => {
-            debug!("Successfully opened connection to port {}", port_name);
-            port
-        }
-    };
-
-    let request_connection = RequestConnectionPacket::new_packet();
-
-    match postcard::to_vec::<Packet, 32>(&request_connection) {
-        Err(e) => {
-            warn!("Failed to serialize packet! Error: {}", e);
-            return false;
-        }
-        Ok(buf) => {
-            match port.write(buf.as_slice()) {
-                Err(e) => {
-                    warn!("Failed to write serialized packet into port!. Error: {}", e);
-                    return false;
-                }
-                Ok(bytes_written) => {
-                    debug!("Successfully wrote {} bytes into port.", bytes_written);
-                }
-            };
-        }
-    };
-
-    false
+    debug!("This port is the correct client port.");
+    true
 }
 
 // NOTE: MAYBE DON'T RETURN A STRING
 #[instrument(skip_all)]
-async fn find_client_port(token: CancellationToken) -> Option<String> {
+fn find_client_port(token: CancellationToken) -> Option<SerialPortInfo> {
     let ports = match serialport::available_ports() {
         Err(e) => {
             error!("Failed to get any ports! Error: {}", e);
@@ -113,37 +70,29 @@ async fn find_client_port(token: CancellationToken) -> Option<String> {
 
     trace!("Found {} ports to check.", ports.len());
 
-    let mut tasks = Vec::new();
-    for port in ports {
-        let task = try_request_connection_for_port(token.clone(), port.clone());
-        tasks.push(async move {
-            if task.await == true {
-                debug!("Found a port! Name: {}", port.port_name);
-                return Some(port.clone());
-            }
-            None
-        });
-    }
-
-    let results = futures::future::join_all(tasks).await;
-
-    return results
+    ports
         .into_iter()
-        .filter_map(|x| x)
-        .collect::<Vec<_>>()
+        .filter_map(|port| {
+            if is_port_for_embedded_hardware(token.clone(), port.clone()) {
+                Some(port)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<SerialPortInfo>>()
         .first()
-        .map(|x| x.port_name.clone());
+        .map(|x| x.clone())
 }
 
 #[instrument(skip_all)]
-async fn wait_for_client_port(token: CancellationToken) -> Result<String, String> {
+async fn wait_for_client_port(token: CancellationToken) -> Result<SerialPortInfo, String> {
     loop {
         if token.is_cancelled() {
             warn!("Token was cancelled.");
-            return Err(String::from("Canceled"));
+            return Err("Cancelled".into());
         }
         trace!("Looking for client port.");
-        if let Some(port_name) = find_client_port(token.clone()).await {
+        if let Some(port_name) = find_client_port(token.clone()) {
             return Ok(port_name);
         }
         trace!("Sleeping briefly before checking again.");
@@ -163,7 +112,7 @@ pub async fn task_handle_client_communication(
     info!("Started.");
 
     trace!("Waiting on client port to be identified.");
-    let port_name = match wait_for_client_port(token.clone()).await {
+    let port_info = match wait_for_client_port(token.clone()).await {
         Err(e) => {
             warn!("Failed to wait for a client port. Cancelling. Error: {}", e);
             // NOTE: MIGHT NOT NEED THIS CHECK.
@@ -174,9 +123,9 @@ pub async fn task_handle_client_communication(
         }
         Ok(port_name) => port_name,
     };
-    info!("Found a client port! Name: {}", port_name);
+    info!("Found a client port! Name: {}", port_info.port_name);
 
-    let mut port = match serialport::new(port_name, 9600)
+    let mut port = match serialport::new(port_info.port_name, 9600)
         .timeout(Duration::from_millis(2500))
         .open()
     {
