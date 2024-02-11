@@ -1,2 +1,3 @@
 [workspace]
-members= [ "common","control_system", "embedded_firmware"]
+members = [ "common","control_system", "embedded_firmware"]
+resolver = "2"

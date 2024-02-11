@@ -1,3 +1,4 @@
+use fixedstr::str64;
 use serde::{Deserialize, Serialize};
 
 // TODO: Impl Display for Packet
@@ -9,6 +10,7 @@ pub enum Packet {
     AcceptConnection(AcceptConnectionPacket),
     ReportSensors(ReportSensorsPacket),
     ReportControlTargets(ReportControlTargetsPacket),
+    ReportLogLine(ReportLogLinePacket),
 }
 
 /// Represents a request to establish connection. Used to determine
@@ -64,15 +66,24 @@ pub enum ValveState {
 pub struct ReportControlTargetsPacket {
     /// The voltage value which the embedded hardware should immediately output
     /// for the fan.
-    fan_control_voltage: u8,
+    pub fan_control_voltage: u8,
 
     /// The voltage value which the embedded hardware should immediately output
     /// for the pump.
-    pump_control_voltage: u8,
+    pub pump_control_voltage: u8,
 
     /// The valve is either instructed to begin opening or closing.
     /// Sending the state which the valve is in results in nothing happening.
-    valve_control_state: bool,
+    pub valve_control_state: bool,
+
+    /// DEBUG: Led control command
+    pub command: bool,
+}
+
+/// Represents a diagnostic log line from the embedded hardware.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ReportLogLinePacket {
+    pub log_line: str64,
 }
 
 impl RequestConnectionPacket {

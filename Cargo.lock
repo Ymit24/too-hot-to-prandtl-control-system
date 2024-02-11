@@ -232,6 +232,8 @@ checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
 name = "common"
 version = "0.1.0"
 dependencies = [
+ "fixedstr",
+ "postcard",
  "serde",
 ]
 
@@ -410,11 +412,13 @@ version = "0.1.0"
 dependencies = [
  "arduino_mkrzero",
  "atsamd-hal",
+ "common",
  "cortex-m",
  "cortex-m-rt",
  "cortex-m-rtic",
  "cortex-m-semihosting 0.5.0",
  "embedded-hal",
+ "fixedstr",
  "heapless",
  "panic-halt",
  "panic-semihosting 0.6.0",
@@ -422,6 +426,15 @@ dependencies = [
  "serde",
  "usb-device",
  "usbd-serial",
+]
+
+[[package]]
+name = "fixedstr"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f4e4dfef7b590ab7d11e531d602fdfb6a3413b09924db1428902bbc4410a9a8"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

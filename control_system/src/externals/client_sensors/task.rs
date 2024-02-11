@@ -289,21 +289,6 @@ fn read_packets_from_port(port: &mut Box<dyn SerialPort>) -> Vec<Packet> {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
-struct ControlPacket {
-    type_id: u8,
-    data: String,
-    command: bool,
-}
-
-// TODO: MOVE THIS TO PROPER PACKET MODEL
-#[derive(serde::Serialize, serde::Deserialize)]
-struct PacketLocal<'a> {
-    type_id: u8,
-    data: &'a str,
-    command: bool,
-}
-
 /// Decode as many packets as possible from a buffer.
 /// Returning the vector of packets and any unused bytes from the buffer.
 fn decode_packets_from_buffer(buffer: &[u8]) -> (Vec<Packet>, &[u8]) {

@@ -15,7 +15,9 @@ use usbd_serial::SerialPort;
 #[app(device = bsp::pac, peripherals=true, dispatchers=[EVSYS])]
 mod app {
     use super::*;
+    use common::packet::{ReportControlTargetsPacket, ReportLogLinePacket, *};
     use cortex_m::peripheral::NVIC;
+    use fixedstr::str64;
     use hal::pac::interrupt;
     use hal::{
         clock::{ClockGenId, ClockSource},
@@ -28,7 +30,6 @@ mod app {
     use usb_device::device::{UsbDevice, UsbDeviceBuilder, UsbVidPid};
     use usb_device::UsbError;
     use usbd_serial::{SerialPort, USB_CLASS_CDC};
-
     #[shared]
     struct Shared {
         device: UsbDevice<'static, UsbBus>,
@@ -37,8 +38,8 @@ mod app {
 
     #[local]
     struct Local {
-        p: Producer<'static, Packet<'static>, 5>, // TODO: MIGHT CHANGE TO JUST THE BUF
-        c: Consumer<'static, Packet<'static>, 5>,
+        p: Producer<'static, Packet, 5>, // TODO: MIGHT CHANGE TO JUST THE BUF
+        c: Consumer<'static, Packet, 5>,
 
         led: bsp::pins::Led,
 
@@ -49,7 +50,7 @@ mod app {
     #[monotonic(binds = RTC, default = true)]
     type RtcMonotonic = hal::rtc::Rtc<Count32Mode>;
 
-    #[init(local=[usb_bus: Option<UsbBusAllocator<UsbBus>> = None, q: Queue<Packet<'static>, 5> = Queue::new(),led_commands_queue: Queue<bool, 10> = Queue::new()])]
+    #[init(local=[usb_bus: Option<UsbBusAllocator<UsbBus>> = None, q: Queue<Packet, 5> = Queue::new(),led_commands_queue: Queue<bool, 10> = Queue::new()])]
     fn init(cx: init::Context) -> (Shared, Local, init::Monotonics) {
         let mut peripherals = cx.device;
         let pins = bsp::pins::Pins::new(peripherals.PORT);
@@ -120,13 +121,6 @@ mod app {
         )
     }
 
-    #[derive(serde::Serialize, serde::Deserialize, Debug, Eq, PartialEq, Clone)]
-    struct Packet<'a> {
-        type_id: u8,
-        data: &'a str,
-        command: bool,
-    }
-
     #[task(shared=[serial], local=[c])]
     fn send_packets(mut cx: send_packets::Context) {
         let c = cx.local.c;
@@ -147,11 +141,9 @@ mod app {
 
     #[task(local=[p])]
     fn blink(mut cx: blink::Context) {
-        let pack = Packet {
-            type_id: 8,
-            data: "__Hello World__",
-            command: false,
-        };
+        let pack = Packet::ReportLogLine(ReportLogLinePacket {
+            log_line: str64::from("abc"),
+        });
 
         let p = cx.local.p;
         if p.ready() {
@@ -203,11 +195,16 @@ mod app {
                         while let Ok((packet, other)) =
                             postcard::take_from_bytes::<Packet>(remaining)
                         {
+                            match packet {
+                                Packet::ReportControlTargets(packet) => {
+                                    if led_commands_producer.ready() {
+                                        led_commands_producer.enqueue(packet.command).unwrap();
+                                    }
+                                }
+                                _ => { /* current only handle this packet type */ }
+                            };
                             // process packets
                             remaining = other;
-                            if led_commands_producer.ready() {
-                                led_commands_producer.enqueue(packet.command).unwrap();
-                            }
                         }
                     }
                 }
