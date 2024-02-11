@@ -29,3 +29,9 @@ impl<const MAX: u16> Display for Rpm<MAX> {
         write!(f, "({} rpm)", self.value)
     }
 }
+
+impl<const MAX: u16> Rpm<MAX> {
+    pub fn try_from_norm(norm: u8) -> Result<Self, RpmError> {
+        Self::try_from((norm / 255u8) as u16)
+    }
+}

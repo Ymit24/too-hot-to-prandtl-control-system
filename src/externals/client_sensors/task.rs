@@ -159,6 +159,23 @@ pub async fn task_handle_client_communication(
     }
 }
 
+// DEBUG
+pub async fn task_debug_send_led_command_to_eh(
+    token: CancellationToken,
+    tx_packets_to_hw: Sender<Packet>,
+) {
+    loop {
+        // TODO: this does nothing.
+        tokio::select! {
+            _ = token.cancelled() => {
+                warn!("Cancelled.");
+                break;
+            },
+            _ = tokio::time::sleep(Duration::from_millis(500)) => {},
+        };
+    }
+}
+
 /// Listens for incoming client messages. Will convert `ReportSensors` messages
 /// into `ClientSensorData` models and transmit them.
 #[tracing::instrument(skip_all)]
@@ -178,7 +195,9 @@ pub async fn task_process_client_sensor_packets(
             Ok(data) = rx_packet.recv() => {
                 // NOTE: MIGHT BE SUFFICIENT/PREFERRED TO CLONE THE TX SENDER RATHER
                 // RATHER THAN SEND A REF.
-                handle_report_sensor_packet(data, &tx_client_sensor_data);
+                if let Err(e) = handle_report_sensor_packet(data, &tx_client_sensor_data) {
+                    error!("Failed to handle report sensor packet. Error: {}", e);
+                }
             },
         };
     }
@@ -292,6 +311,9 @@ fn decode_packets_from_buffer(buffer: &[u8]) -> (Vec<Packet>, &[u8]) {
     while let Ok((packet, extra)) = postcard::take_from_bytes::<Packet>(remaining_buffer) {
         remaining_buffer = extra;
         packets.push(packet);
+    }
+    if buffer.len() > 0 && packets.is_empty() {
+        warn!("Didn't decode a single packet from {} bytes!", buffer.len());
     }
     (packets, remaining_buffer)
 }

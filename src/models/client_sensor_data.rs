@@ -1,17 +1,31 @@
 use std::fmt::Display;
 
-use super::{packet::ReportSensorsPacket, rpm::Rpm};
+use super::{
+    packet::ReportSensorsPacket,
+    rpm::{Rpm, RpmError},
+};
 use thiserror::Error;
+
+const PUMP_RPM: u16 = 3200;
+type PumpRpm = Rpm<PUMP_RPM>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ClientSensorData {
-    pub pump_speed: Rpm<3200>, // NOTE: placeholder
+    pub pump_speed: Rpm<PUMP_RPM>, // NOTE: placeholder
 }
 
 #[derive(Error, Debug)]
 pub enum ClientSensorDataError {
     #[error("Generic catch all error.")]
     Invalid,
+    #[error("RpmError")]
+    RpmError(RpmError),
+}
+
+impl From<RpmError> for ClientSensorDataError {
+    fn from(value: RpmError) -> Self {
+        Self::RpmError(value)
+    }
 }
 
 impl Display for ClientSensorData {
@@ -24,6 +38,11 @@ impl TryFrom<ReportSensorsPacket> for ClientSensorData {
     type Error = ClientSensorDataError;
 
     fn try_from(value: ReportSensorsPacket) -> Result<Self, Self::Error> {
+        let pump_rpm: PumpRpm = match Rpm::try_from_norm(value.pump_speed_norm) {
+            Err(e) => return Err(e.into()),
+            Ok(rpm) => rpm,
+        };
+        // 0>= pump_speed_rpm >= 3200
         todo!()
     }
 }
