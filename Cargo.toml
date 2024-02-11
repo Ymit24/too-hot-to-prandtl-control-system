@@ -1,2 +1,2 @@
 [workspace]
-members= ["control_system"]
+members= ["control_system", "embedded_firmware"]
