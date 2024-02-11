@@ -1,2 +1,2 @@
 [workspace]
-members= ["too_hot_to_prandtl_control_system"]
+members= ["control_system"]

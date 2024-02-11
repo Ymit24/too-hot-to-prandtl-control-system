@@ -1,5 +1,5 @@
 [package]
-name = "too_hot_to_prandtl_control_system"
+name = "control_system"
 version = "0.1.0"
 edition = "2021"
 
