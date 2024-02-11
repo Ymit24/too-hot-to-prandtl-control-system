@@ -11,8 +11,9 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::models::{
     client_sensor_data::{self, ClientSensorData},
-    packet::{Packet, RequestConnectionPacket},
 };
+
+use common::packet::*;
 
 const PRODUCT_NAME: &str = "Too Hot To Prandtl Controller";
 const SERIAL_NUMBER: &str = "1324";

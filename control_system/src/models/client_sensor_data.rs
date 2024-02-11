@@ -1,9 +1,7 @@
 use std::fmt::Display;
 
-use super::{
-    packet::ReportSensorsPacket,
-    rpm::{Rpm, RpmError},
-};
+use super::rpm::{Rpm, RpmError};
+use common::packet::ReportSensorsPacket;
 use thiserror::Error;
 
 const PUMP_RPM: u16 = 3200;

@@ -2,6 +2,8 @@ pub fn add(left: usize, right: usize) -> usize {
     left + right
 }
 
+pub mod packet;
+
 #[cfg(test)]
 mod tests {
     use super::*;
