@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use thiserror::Error;
 
-#[derive(Debug,Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Rpm<const MAX: u16> {
     pub value: u16,
 }
@@ -33,5 +33,10 @@ impl<const MAX: u16> Display for Rpm<MAX> {
 impl<const MAX: u16> Rpm<MAX> {
     pub fn try_from_norm(norm: u8) -> Result<Self, RpmError> {
         Self::try_from((norm / 255u8) as u16)
+    }
+
+    /// Convert to a normalized u8 (0 rpm = 0 & MAX rpm = 255)
+    pub fn into_norm(self) -> u8 {
+        (((self.value as f32) / (u16::max_value() as f32)) * (u8::max_value() as f32)) as u8
     }
 }

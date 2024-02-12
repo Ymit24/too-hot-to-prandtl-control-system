@@ -17,6 +17,7 @@ pub async fn task_poll_host_sensors(
     tx_host_sensor_data: Sender<HostSensorData>,
 ) {
     tracing::info!("Started.");
+    tokio::time::sleep(Duration::from_millis(4500)).await;
     loop {
         business_logic(service, &tx_host_sensor_data).await;
 
@@ -25,7 +26,7 @@ pub async fn task_poll_host_sensors(
                 warn!("Cancelled.");
                 break;
             },
-            _ = tokio::time::sleep(Duration::from_millis(500)) => {}
+            _ = tokio::time::sleep(Duration::from_millis(1500)) => {}
         };
     }
 }

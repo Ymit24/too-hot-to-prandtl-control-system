@@ -1,7 +1,7 @@
 use anyhow::Result;
 use futures::StreamExt;
 use serialport::{SerialPort, SerialPortInfo};
-use std::time::Duration;
+use std::{fmt::write, time::Duration};
 use tokio::{
     select,
     sync::broadcast::{Receiver, Sender},
@@ -11,6 +11,7 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::models::{
     client_sensor_data::{self, ClientSensorData},
+    control_event::ControlEvent,
 };
 
 use common::packet::*;
@@ -58,7 +59,6 @@ fn is_port_for_embedded_hardware(token: CancellationToken, port: SerialPortInfo)
     true
 }
 
-// NOTE: MAYBE DON'T RETURN A STRING
 #[instrument(skip_all)]
 fn find_client_port(token: CancellationToken) -> Option<SerialPortInfo> {
     let ports = match serialport::available_ports() {
@@ -108,7 +108,8 @@ async fn wait_for_client_port(token: CancellationToken) -> Result<SerialPortInfo
 #[tracing::instrument(skip_all)]
 pub async fn task_handle_client_communication(
     token: CancellationToken,
-    tx_packets: Sender<Packet>,
+    tx_packets_from_hw: Sender<Packet>,
+    mut rx_packets_to_hw: Receiver<Packet>,
 ) {
     info!("Started.");
 
@@ -127,7 +128,7 @@ pub async fn task_handle_client_communication(
     info!("Found a client port! Name: {}", port_info.port_name);
 
     let mut port = match serialport::new(port_info.port_name, 9600)
-        .timeout(Duration::from_millis(2500))
+        .timeout(Duration::from_millis(1000))
         .open()
     {
         Err(e) => {
@@ -144,7 +145,7 @@ pub async fn task_handle_client_communication(
         for packet in packets {
             debug!("Received Communication Packet: {:?}", packet);
 
-            match tx_packets.send(packet) {
+            match tx_packets_from_hw.send(packet) {
                 Err(e) => warn!("Failed to send packet over queue. Error: {}", e),
                 Ok(_) => trace!("Successfully sent packet over queue."),
             }
@@ -155,25 +156,38 @@ pub async fn task_handle_client_communication(
                 warn!("Cancelled.");
                 break;
             },
+            Ok(data) = rx_packets_to_hw.recv() => {
+                debug!("Received packet to write to port. Packet: {:?}",data);
+                // NOTE: Received a packet TO SEND to hw
+                if let Err(e) = write_packet_to_port(&mut port, data) {
+                    warn!("Failed to write packet to port! Error: {}", e);
+                } else {
+                    debug!("Successfully wrote packet to port!");
+                }
+            },
             _ = tokio::time::sleep(Duration::from_millis(500)) => {}
         };
     }
 }
 
-// DEBUG
-pub async fn task_debug_send_led_command_to_eh(
-    token: CancellationToken,
-    tx_packets_to_hw: Sender<Packet>,
-) {
-    loop {
-        // TODO: this does nothing.
-        tokio::select! {
-            _ = token.cancelled() => {
-                warn!("Cancelled.");
-                break;
-            },
-            _ = tokio::time::sleep(Duration::from_millis(500)) => {},
-        };
+/// Send a single packet of data to the embedded hardware.
+#[instrument(skip_all)]
+fn write_packet_to_port(port: &mut Box<dyn SerialPort>, packet: Packet) -> Result<usize> {
+    match postcard::to_vec::<Packet, 64>(&packet) {
+        Err(e) => {
+            warn!("Failed to encode packet to byte array. Error: {}", e);
+            Err(e.into())
+        }
+        Ok(buffer) => match port.write(buffer.as_slice()) {
+            Err(e) => {
+                warn!("Failed to write byte buffer to port. Error: {}", e);
+                Err(e.into())
+            }
+            Ok(length) => {
+                debug!("Successfully wrote {} bytes to port.", length);
+                Ok(length)
+            }
+        },
     }
 }
 
@@ -183,7 +197,7 @@ pub async fn task_debug_send_led_command_to_eh(
 pub async fn task_process_client_sensor_packets(
     token: CancellationToken,
     tx_client_sensor_data: Sender<ClientSensorData>,
-    mut rx_packet: Receiver<Packet>,
+    mut rx_packets_from_hw: Receiver<Packet>,
 ) {
     info!("Started.");
 
@@ -193,14 +207,65 @@ pub async fn task_process_client_sensor_packets(
                 warn!("Cancelled.");
                 break;
             },
-            Ok(data) = rx_packet.recv() => {
+            Ok(data) = rx_packets_from_hw.recv() => {
+                debug!("Got packet from hardware. Packet: {:?}",data);
                 // NOTE: MIGHT BE SUFFICIENT/PREFERRED TO CLONE THE TX SENDER RATHER
                 // RATHER THAN SEND A REF.
                 if let Err(e) = handle_report_sensor_packet(data, &tx_client_sensor_data) {
                     error!("Failed to handle report sensor packet. Error: {}", e);
+                } else {
+                    debug!("Successfully handled report sensor packet.");
                 }
             },
         };
+    }
+}
+
+/// This task will convert control frames into packets and queue them for
+/// transmission to the embedded hardware.
+#[instrument(skip_all)]
+pub async fn task_send_control_frames_to_client(
+    token: CancellationToken,
+    mut rx_control_frame: Receiver<ControlEvent>,
+    tx_send_packets_to_hw: Sender<Packet>,
+) {
+    info!("Started");
+    loop {
+        tokio::select! {
+            _ = token.cancelled() => {
+                warn!("Cancelled.");
+                break;
+            },
+            Ok(data) = rx_control_frame.recv() => {
+                match convert_control_frame_to_packet_and_send_to_hardware(data, &tx_send_packets_to_hw) {
+                    Err(e) => {
+                        warn!("Failed to packetize and queue control frame for transmission. Error: {}", e);
+                    },
+                    Ok(_) => {
+                        debug!("Successfully packetized and queued control frame for transmission.");
+                    }
+                }
+            },
+        };
+    }
+}
+
+/// Convert a control frame into a packet and queue it to be sent.
+/// Returns a result, ```Ok(())``` if the packet was converted and queued,
+/// ```Err``` otherwise.
+fn convert_control_frame_to_packet_and_send_to_hardware(
+    control_frame: ControlEvent,
+    tx_send_packets_to_hw: &Sender<Packet>,
+) -> Result<()> {
+    let packet = match Packet::try_from(control_frame) {
+        Err(e) => {
+            return Err(e.into());
+        }
+        Ok(packet) => packet,
+    };
+    match tx_send_packets_to_hw.send(packet) {
+        Err(e) => Err(e.into()),
+        Ok(_) => Ok(()),
     }
 }
 
@@ -234,7 +299,10 @@ fn handle_report_sensor_packet(
                 client_sensor_data
             );
         }
-        _ => { /* NOTE: NOT INTERESTED IN OTHER PACKET TYPES HERE. */ }
+        _ => {
+            /* NOTE: NOT INTERESTED IN OTHER PACKET TYPES HERE. */
+            trace!("Received packet other than sensor packet.");
+        }
     }
 
     Ok(())

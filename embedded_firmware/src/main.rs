@@ -38,19 +38,24 @@ mod app {
 
     #[local]
     struct Local {
-        p: Producer<'static, Packet, 5>, // TODO: MIGHT CHANGE TO JUST THE BUF
-        c: Consumer<'static, Packet, 5>,
+        tx_packets: Producer<'static, Packet, 16>, // TODO: MIGHT CHANGE TO JUST THE BUF
+        rx_packets: Consumer<'static, Packet, 16>,
 
         led: bsp::pins::Led,
 
-        led_commands_producer: Producer<'static, bool, 10>,
-        led_commands_consumer: Consumer<'static, bool, 10>,
+        led_commands_producer: Producer<'static, bool, 16>,
+        led_commands_consumer: Consumer<'static, bool, 16>,
     }
 
     #[monotonic(binds = RTC, default = true)]
     type RtcMonotonic = hal::rtc::Rtc<Count32Mode>;
 
-    #[init(local=[usb_bus: Option<UsbBusAllocator<UsbBus>> = None, q: Queue<Packet, 5> = Queue::new(),led_commands_queue: Queue<bool, 10> = Queue::new()])]
+    #[init(local=[
+           usb_bus: Option<UsbBusAllocator<UsbBus>> = None,
+           q: Queue<Packet,
+           16> = Queue::new(),
+           led_commands_queue: Queue<bool, 16> = Queue::new()
+    ])]
     fn init(cx: init::Context) -> (Shared, Local, init::Monotonics) {
         let mut peripherals = cx.device;
         let pins = bsp::pins::Pins::new(peripherals.PORT);
@@ -98,7 +103,7 @@ mod app {
 
         core.SCB.set_sleepdeep();
 
-        let (p, c) = cx.local.q.split();
+        let (tx_packets, rx_packets) = cx.local.q.split();
         let (led_commands_producer, led_commands_consumer) = cx.local.led_commands_queue.split();
 
         blink::spawn().unwrap();
@@ -111,8 +116,8 @@ mod app {
                 serial: serial_port,
             },
             Local {
-                p,
-                c,
+                tx_packets,
+                rx_packets,
                 led_commands_consumer,
                 led_commands_producer,
                 led,
@@ -121,11 +126,11 @@ mod app {
         )
     }
 
-    #[task(shared=[serial], local=[c])]
+    #[task(shared=[serial], local=[rx_packets])]
     fn send_packets(mut cx: send_packets::Context) {
-        let c = cx.local.c;
+        let rx_packets = cx.local.rx_packets;
         let mut serial = cx.shared.serial;
-        if let Some(packet) = c.dequeue() {
+        if let Some(packet) = rx_packets.dequeue() {
             let bytes: heapless::Vec<u8, 64> = postcard::to_vec(&packet).unwrap();
 
             serial.lock(|serial_locked| {
@@ -139,17 +144,29 @@ mod app {
         send_packets::spawn_after(hal::rtc::Duration::millis(500u32)).ok();
     }
 
-    #[task(local=[p])]
+    #[task(local=[tx_packets])]
     fn blink(mut cx: blink::Context) {
+        // let pack = Packet::ReportLogLine(ReportLogLinePacket {
+        //     log_line: str64::from("abc"),
+        // });
+        let pack = Packet::ReportSensors(ReportSensorsPacket {
+            fan_speed_norm: 100,
+            pump_speed_norm: 200,
+            valve_state: ValveState::Opening,
+        });
+
+        let tx_packets = cx.local.tx_packets;
+        if tx_packets.ready() {
+            tx_packets.enqueue(pack.clone()).unwrap(); // NOTE: Should always be good.
+        }
+
         let pack = Packet::ReportLogLine(ReportLogLinePacket {
             log_line: str64::from("abc"),
         });
-
-        let p = cx.local.p;
-        if p.ready() {
-            p.enqueue(pack.clone()).unwrap(); // NOTE: Should always be good.
+        let tx_packets = cx.local.tx_packets;
+        if tx_packets.ready() {
+            tx_packets.enqueue(pack.clone()).unwrap(); // NOTE: Should always be good.
         }
-
         blink::spawn_after(hal::rtc::Duration::secs(1u32)).ok();
     }
 
@@ -176,6 +193,7 @@ mod app {
         let device = cx.shared.device;
         let serial = cx.shared.serial;
         let led_commands_producer = cx.local.led_commands_producer;
+        // NOTE: Change this to always be able to produce bytes without lock maybe?
         (device, serial).lock(|device_locked, serial_locked| {
             if device_locked.poll(&mut [serial_locked]) {
                 let mut buf = [0u8; 64];
@@ -191,7 +209,6 @@ mod app {
                     Ok(_count) => {
                         let mut remaining: &[u8] = &buf[0.._count];
 
-                        let mut _cmd: bool = false;
                         while let Ok((packet, other)) =
                             postcard::take_from_bytes::<Packet>(remaining)
                         {

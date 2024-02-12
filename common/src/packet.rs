@@ -45,7 +45,7 @@ pub struct ReportSensorsPacket {
 /// Represents the state of the valve. The valve takes multiple seconds to
 /// change state and so this allows the control system to avoid rapidly
 /// trying to change from open/closed without letting it first finish changing.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Copy)]
 pub enum ValveState {
     /// Valve is fully open.
     Open,
@@ -58,6 +58,17 @@ pub enum ValveState {
 
     /// Valve is closing but not fully closed.
     Closing,
+}
+
+impl Into<bool> for ValveState {
+    fn into(self) -> bool {
+        match self {
+            ValveState::Open => true,
+            ValveState::Opening => true,
+            ValveState::Closed => false,
+            ValveState::Closing => false,
+        }
+    }
 }
 
 /// Represents a snapshot of raw target control state. Sent from the host

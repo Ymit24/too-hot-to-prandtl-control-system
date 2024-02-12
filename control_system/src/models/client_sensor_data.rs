@@ -41,6 +41,8 @@ impl TryFrom<ReportSensorsPacket> for ClientSensorData {
             Ok(rpm) => rpm,
         };
         // 0>= pump_speed_rpm >= 3200
-        todo!()
+        Ok(ClientSensorData {
+            pump_speed: pump_rpm,
+        })
     }
 }
