@@ -15,8 +15,8 @@ use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tracing::level_filters::LevelFilter;
 
 use crate::externals::client_sensors::task::{
-    task_handle_client_communication, task_process_client_sensor_packets,
-    task_send_control_frames_to_client,
+    task_handle_client_communication, task_lifetime_management_of_client_communication_task,
+    task_process_client_sensor_packets, task_send_control_frames_to_client,
 };
 
 #[tokio::main]
@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
         .with_line_number(true)
         .with_thread_ids(true)
         .with_target(false)
-        .with_max_level(LevelFilter::TRACE)
+        .with_max_level(LevelFilter::DEBUG)
         .finish();
 
     tracing::subscriber::set_global_default(subscriber)?;
@@ -64,9 +64,14 @@ async fn main() -> Result<()> {
     });
 
     let token_clone = token.clone();
+    let tx_send_packets_to_hw_clone = tx_send_packets_to_hw.clone();
     tracker.spawn(async {
-        task_handle_client_communication(token_clone, tx_packets_from_hw, rx_send_packets_to_hw)
-            .await;
+        task_lifetime_management_of_client_communication_task(
+            token_clone,
+            tx_packets_from_hw,
+            tx_send_packets_to_hw_clone,
+        )
+        .await;
     });
 
     let token_clone = token.clone();

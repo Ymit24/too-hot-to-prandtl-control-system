@@ -101,6 +101,32 @@ async fn wait_for_client_port(token: CancellationToken) -> Result<SerialPortInfo
     }
 }
 
+pub async fn task_lifetime_management_of_client_communication_task(
+    token: CancellationToken,
+    tx_packets_from_hw: Sender<Packet>,
+    tx_packets_to_hw: Sender<Packet>,
+) {
+    info!("Started");
+
+    loop {
+        debug!("About to start client communication task.");
+        let tx_packets_from_hw_clone = tx_packets_from_hw.clone();
+        task_handle_client_communication(
+            token.clone(),
+            tx_packets_from_hw_clone.clone(),
+            tx_packets_to_hw.subscribe(),
+        )
+        .await;
+        warn!("Client communication task exited.");
+
+        if token.is_cancelled() {
+            warn!("Cancelled.");
+            break;
+        }
+        info!("Restarting client communication task.");
+    }
+}
+
 /// This task handles finding, opening, and sending/receiving packets with
 /// the embedded hardware. This task polls to determine when packets are available
 /// to read. If not currently reading, it will send packets as they're queued for
@@ -140,7 +166,13 @@ pub async fn task_handle_client_communication(
     };
 
     loop {
-        let packets = read_packets_from_port(&mut port);
+        let packets = match read_packets_from_port(&mut port) {
+            Ok(packets) => packets,
+            Err(e) => {
+                error!("Failed to read packets from port. Error: {}", e);
+                break;
+            }
+        };
 
         for packet in packets {
             debug!("Received Communication Packet: {:?}", packet);
@@ -180,7 +212,7 @@ fn write_packet_to_port(port: &mut Box<dyn SerialPort>, packet: Packet) -> Resul
         }
         Ok(buffer) => match port.write(buffer.as_slice()) {
             Err(e) => {
-                warn!("Failed to write byte buffer to port. Error: {}", e);
+                error!("Failed to write byte buffer to port. Error: {}", e);
                 Err(e.into())
             }
             Ok(length) => {
@@ -239,7 +271,7 @@ pub async fn task_send_control_frames_to_client(
             Ok(data) = rx_control_frame.recv() => {
                 match convert_control_frame_to_packet_and_send_to_hardware(data, &tx_send_packets_to_hw) {
                     Err(e) => {
-                        warn!("Failed to packetize and queue control frame for transmission. Error: {}", e);
+                        error!("Failed to packetize and queue control frame for transmission. Error: {}", e);
                     },
                     Ok(_) => {
                         debug!("Successfully packetized and queued control frame for transmission.");
@@ -309,29 +341,36 @@ fn handle_report_sensor_packet(
 }
 
 #[instrument(skip_all)]
-fn is_ready_to_read_from_port(port: &Box<dyn SerialPort>) -> bool {
+fn is_ready_to_read_from_port(port: &Box<dyn SerialPort>) -> Result<bool> {
     match port.bytes_to_read() {
         Ok(bytes) => {
             trace!("Found {} bytes ready to read from port.", bytes);
-            bytes > 0
+            Ok(bytes > 0)
         }
         Err(e) => {
             warn!(
                 "Failed to check if bytes are available to read from port. Error: {}",
                 e
             );
-            false
+            Err(e.into())
         }
     }
 }
 
 #[instrument(skip_all)]
-fn read_packets_from_port(port: &mut Box<dyn SerialPort>) -> Vec<Packet> {
-    if !is_ready_to_read_from_port(port) {
-        trace!("Not ready to read yet.");
-        return vec![];
-    } else {
-        trace!("Is ready to read from port.");
+fn read_packets_from_port(port: &mut Box<dyn SerialPort>) -> Result<Vec<Packet>> {
+    match is_ready_to_read_from_port(port) {
+        Ok(true) => {
+            trace!("Is ready to read from port.");
+        }
+        Ok(false) => {
+            trace!("Not ready to read yet.");
+            return Ok(vec![]);
+        }
+        Err(e) => {
+            trace!("Not ready to read yet with error. Error: {}", e);
+            return Err(e.into());
+        }
     }
 
     let mut read_buffer: [u8; 1024] = [0; 1024];
@@ -348,11 +387,11 @@ fn read_packets_from_port(port: &mut Box<dyn SerialPort>) -> Vec<Packet> {
                 remaining_bytes.len()
             );
 
-            return packets;
+            return Ok(packets);
         }
         Err(e) => {
             warn!("Failed to read from port. Error: {}", e);
-            return vec![];
+            return Err(e.into());
         }
     }
 }
