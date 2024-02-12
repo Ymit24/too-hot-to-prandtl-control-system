@@ -80,7 +80,9 @@ pub struct ReportControlTargetsPacket {
     pub fan_control_voltage: u8,
 
     /// The voltage value which the embedded hardware should immediately output
-    /// for the pump.
+    /// for the pump. This is a normalized value where zero maps to zero volts
+    /// and ```u8::max_value()``` corresponds to maximum voltage. The voltage
+    /// is left to the embedded hardware to decide.
     pub pump_control_voltage: u8,
 
     /// The valve is either instructed to begin opening or closing.

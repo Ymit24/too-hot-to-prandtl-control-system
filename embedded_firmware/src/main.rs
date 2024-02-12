@@ -42,6 +42,9 @@ mod app {
     use usb_device::device::{UsbDevice, UsbDeviceBuilder, UsbVidPid};
     use usb_device::UsbError;
     use usbd_serial::{SerialPort, USB_CLASS_CDC};
+
+    use hal::pwm::Pwm0;
+
     #[shared]
     struct Shared {
         device: UsbDevice<'static, UsbBus>,
@@ -60,6 +63,8 @@ mod app {
 
         rx_control_frames: Consumer<'static, ReportControlTargetsPacket, 4>,
         tx_control_frames: Producer<'static, ReportControlTargetsPacket, 4>,
+
+        pump_pwm: Pwm0,
     }
 
     #[monotonic(binds = RTC, default = true)]
@@ -139,6 +144,7 @@ mod app {
         blink::spawn().unwrap();
         task_led_commander::spawn().unwrap();
         task_usb_io::spawn().unwrap();
+        task_write_control_targets_out::spawn().unwrap();
 
         (
             Shared {
@@ -153,6 +159,7 @@ mod app {
                 led,
                 tx_control_frames,
                 rx_control_frames,
+                pump_pwm: pwm0,
             },
             init::Monotonics(rtc),
         )
@@ -172,14 +179,14 @@ mod app {
         task_led_commander::spawn_after(hal::rtc::Duration::millis(100)).ok();
     }
 
-    #[task(local=[rx_control_frames])]
+    #[task(local=[rx_control_frames,pump_pwm])]
     fn task_write_control_targets_out(cx: task_write_control_targets_out::Context) {
-        task_write_control_targets_out_internal();
+        task_write_control_targets_out_internal(cx);
 
         task_write_control_targets_out::spawn_after(hal::rtc::Duration::millis(500)).ok();
     }
 
-    #[task(shared=[serial], local=[led_commands_producer, rx_packets])]
+    #[task(shared=[serial], local=[led_commands_producer, rx_packets, tx_control_frames])]
     fn task_usb_io(mut cx: task_usb_io::Context) {
         task_usb_io_internal(cx);
 

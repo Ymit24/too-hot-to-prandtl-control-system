@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
         .with_line_number(true)
         .with_thread_ids(true)
         .with_target(false)
-        .with_max_level(LevelFilter::TRACE)
+        .with_max_level(LevelFilter::INFO)
         .finish();
 
     tracing::subscriber::set_global_default(subscriber)?;

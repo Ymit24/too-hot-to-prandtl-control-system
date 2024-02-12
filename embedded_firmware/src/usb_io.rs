@@ -1,5 +1,5 @@
 use atsamd_hal::usb::UsbBus;
-use common::packet::Packet;
+use common::packet::{Packet, ReportControlTargetsPacket};
 use heapless::spsc::{Consumer, Producer};
 use usbd_serial::SerialPort;
 
@@ -11,6 +11,7 @@ pub fn task_usb_io_internal(cx: task_usb_io::Context) {
     let mut serial = cx.shared.serial;
     let mut tx_led_commands = cx.local.led_commands_producer;
     let rx_packets = cx.local.rx_packets;
+    let mut tx_control_frames = cx.local.tx_control_frames;
 
     let mut buf = [0u8; 128];
     let bytes = serial.lock(|serial_locked| match serial_locked.read(&mut buf) {
@@ -18,7 +19,7 @@ pub fn task_usb_io_internal(cx: task_usb_io::Context) {
         Ok(bytes_read) => bytes_read,
     });
     if bytes != 0 {
-        decode_and_process_packets(&buf[0..bytes], &mut tx_led_commands);
+        decode_and_process_packets(&buf[0..bytes], &mut tx_led_commands, &mut tx_control_frames);
     }
 
     while let Some(packet) = rx_packets.dequeue() {
@@ -32,7 +33,11 @@ pub fn task_usb_io_internal(cx: task_usb_io::Context) {
     });
 }
 
-fn decode_and_process_packets(buffer: &[u8], tx_led_commands: &mut Producer<bool, 16>) {
+fn decode_and_process_packets(
+    buffer: &[u8],
+    tx_led_commands: &mut Producer<bool, 16>,
+    tx_control_frames: &mut Producer<ReportControlTargetsPacket, 4>,
+) {
     let mut remaining = buffer;
     while let Ok((packet, other)) = postcard::take_from_bytes::<Packet>(remaining) {
         remaining = other;
@@ -40,6 +45,9 @@ fn decode_and_process_packets(buffer: &[u8], tx_led_commands: &mut Producer<bool
             Packet::ReportControlTargets(packet) => {
                 if tx_led_commands.ready() {
                     tx_led_commands.enqueue(packet.command);
+                }
+                if tx_control_frames.ready() {
+                    tx_control_frames.enqueue(packet);
                 }
             }
             _ => {}

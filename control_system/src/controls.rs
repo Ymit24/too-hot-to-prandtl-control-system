@@ -19,9 +19,14 @@ pub fn generate_control_frame(
     // TODO: REMOVE THIS DEBUG CODE
     let state = rand::random();
     tracing::info!("Current led state: {}", state);
+    let v1: bool = rand::random();
+    let v2: bool = rand::random();
+    let v = v1 as u8 + v2 as u8;
     ControlEvent {
         fan_speed: crate::models::rpm::Rpm { value: 1250 },
-        pump_pwm: crate::models::voltage::Voltage { value: 3.4f32 },
+        pump_pwm: crate::models::voltage::Voltage {
+            value: v as f32 * 2.5f32,
+        },
         valve_state: ValveState::Open,
         debug_command: state,
     }
