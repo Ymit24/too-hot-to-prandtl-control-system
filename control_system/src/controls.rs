@@ -21,12 +21,13 @@ pub fn generate_control_frame(
     tracing::info!("Current led state: {}", state);
     let v1: bool = rand::random();
     let v2: bool = rand::random();
+    let v3: bool = rand::random();
+    let v4: bool = rand::random();
     let v = v1 as u8 + v2 as u8;
+    let vv = v3 as u8 + v4 as u8;
     ControlEvent {
-        fan_speed: crate::models::rpm::Rpm { value: 1250 },
-        pump_pwm: crate::models::voltage::Voltage {
-            value: v as f32 * 2.5f32,
-        },
+        fan_speed: v as u32 * (u32::max_value() / 2u32),
+        pump_pwm: vv as u32 * (u32::max_value() / 2u32),
         valve_state: ValveState::Open,
         debug_command: state,
     }

@@ -129,6 +129,7 @@ mod app {
         let (tx_control_frames, rx_control_frames) = cx.local.control_frame_queue.split();
 
         let _a4 = pins.pa04.into_mode::<hal::gpio::AlternateE>();
+        let _a5 = pins.pa05.into_mode::<hal::gpio::AlternateE>();
         let tcc0_tcc1_clock: &hal::clock::Tcc0Tcc1Clock = &clocks.tcc0_tcc1(&gclk).unwrap();
         let mut pwm0 = hal::pwm::Pwm0::new(
             &tcc0_tcc1_clock,
@@ -139,7 +140,9 @@ mod app {
 
         let max_duty_cycle = pwm0.get_max_duty();
         pwm0.enable(hal::pwm::Channel::_0);
+        pwm0.enable(hal::pwm::Channel::_1);
         pwm0.set_duty(hal::pwm::Channel::_0, max_duty_cycle);
+        pwm0.set_duty(hal::pwm::Channel::_0, max_duty_cycle / 2);
 
         blink::spawn().unwrap();
         task_led_commander::spawn().unwrap();

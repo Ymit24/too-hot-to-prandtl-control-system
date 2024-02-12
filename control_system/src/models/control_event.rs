@@ -5,8 +5,8 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ControlEvent {
-    pub fan_speed: Rpm<2300>, // NOTE: placeholder
-    pub pump_pwm: Voltage<5>, // NOTE: placeholder
+    pub fan_speed: u32, // NOTE: placeholder
+    pub pump_pwm: u32, // NOTE: placeholder
     pub valve_state: ValveState,
     pub debug_command: bool, // NOTE: THIS IS A DEBUG COMMAND
 }
@@ -32,8 +32,8 @@ impl TryFrom<ControlEvent> for Packet {
 
     fn try_from(value: ControlEvent) -> Result<Self, Self::Error> {
         Ok(Packet::ReportControlTargets(ReportControlTargetsPacket {
-            fan_control_voltage: value.fan_speed.into_norm(),
-            pump_control_voltage: value.pump_pwm.into_norm(),
+            fan_control_pwm: value.fan_speed,
+            pump_control_pwm: value.pump_pwm,
             valve_control_state: value.valve_state.into(),
             command: value.debug_command,
         }))

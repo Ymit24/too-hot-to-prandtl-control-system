@@ -35,8 +35,8 @@ impl<const MAX: u16> Rpm<MAX> {
         Self::try_from((norm / 255u8) as u16)
     }
 
-    /// Convert to a normalized u8 (0 rpm = 0 & MAX rpm = 255)
-    pub fn into_norm(self) -> u8 {
-        (((self.value as f32) / (u16::max_value() as f32)) * (u8::max_value() as f32)) as u8
+    /// Convert to a u32 (0 rpm = 0 & MAX rpm = ```u32::max_value()```)
+    pub fn into_norm(self) -> u32 {
+        (((self.value as f32) / (u32::max_value() as f32)) * (u8::max_value() as f32)) as u32
     }
 }
