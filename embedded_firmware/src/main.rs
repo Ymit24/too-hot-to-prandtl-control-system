@@ -107,8 +107,9 @@ mod app {
         let (led_commands_producer, led_commands_consumer) = cx.local.led_commands_queue.split();
 
         blink::spawn().unwrap();
-        send_packets::spawn().unwrap();
+        //send_packets::spawn().unwrap();
         task_led_commander::spawn().unwrap();
+        task_usb_io::spawn().unwrap();
 
         (
             Shared {
@@ -126,29 +127,8 @@ mod app {
         )
     }
 
-    #[task(shared=[serial], local=[rx_packets])]
-    fn send_packets(mut cx: send_packets::Context) {
-        let rx_packets = cx.local.rx_packets;
-        let mut serial = cx.shared.serial;
-        if let Some(packet) = rx_packets.dequeue() {
-            let bytes: heapless::Vec<u8, 64> = postcard::to_vec(&packet).unwrap();
-
-            serial.lock(|serial_locked| {
-                let _ = serial_locked.write(&bytes);
-                let _ = serial_locked.flush();
-            });
-        } else {
-            // nothing was ready
-        }
-
-        send_packets::spawn_after(hal::rtc::Duration::millis(500u32)).ok();
-    }
-
     #[task(local=[tx_packets])]
     fn blink(mut cx: blink::Context) {
-        // let pack = Packet::ReportLogLine(ReportLogLinePacket {
-        //     log_line: str64::from("abc"),
-        // });
         let pack = Packet::ReportSensors(ReportSensorsPacket {
             fan_speed_norm: 100,
             pump_speed_norm: 200,
@@ -157,30 +137,29 @@ mod app {
 
         let tx_packets = cx.local.tx_packets;
         if tx_packets.ready() {
-            tx_packets.enqueue(pack.clone()).unwrap(); // NOTE: Should always be good.
+            let _ = tx_packets.enqueue(pack.clone());
         }
 
-        let pack = Packet::ReportLogLine(ReportLogLinePacket {
-            log_line: str64::from("abc"),
-        });
-        let tx_packets = cx.local.tx_packets;
-        if tx_packets.ready() {
-            tx_packets.enqueue(pack.clone()).unwrap(); // NOTE: Should always be good.
-        }
+        //       let pack = Packet::ReportLogLine(ReportLogLinePacket {
+        //           log_line: str64::from("abc"),
+        //       });
+        //       if tx_packets.ready() {
+        //           tx_packets.enqueue(pack.clone()).unwrap(); // NOTE: Should always be good.
+        //       }
         blink::spawn_after(hal::rtc::Duration::secs(1u32)).ok();
     }
 
-    #[task(local=[led_commands_consumer,led])]
+    #[task(local=[led_commands_consumer])]
     fn task_led_commander(mut cx: task_led_commander::Context) {
         let consumer = cx.local.led_commands_consumer;
-        let led = cx.local.led;
+        // let led = cx.local.led;
 
         if consumer.ready() {
             while let Some(command) = consumer.dequeue() {
                 if command {
-                    led.set_high();
+                    //led.set_high();
                 } else {
-                    led.set_low();
+                    //led.set_low();
                 }
             }
         }
@@ -188,44 +167,64 @@ mod app {
         task_led_commander::spawn_after(hal::rtc::Duration::millis(100)).ok();
     }
 
-    #[task(binds=USB, shared=[serial, device], local=[led_commands_producer])]
+    #[task(shared=[serial], local=[led_commands_producer, rx_packets,led])]
+    fn task_usb_io(mut cx: task_usb_io::Context) {
+        let mut serial = cx.shared.serial;
+        let mut tx_led_commands = cx.local.led_commands_producer;
+        let led = cx.local.led;
+
+        let mut buf = [0u8; 128];
+        let bytes = serial.lock(|serial_locked| match serial_locked.read(&mut buf) {
+            Err(e) => 0,
+            Ok(bytes_read) => bytes_read,
+        });
+        if bytes != 0 {
+            decode_and_process_packets(&buf[0..bytes], &mut tx_led_commands, led);
+        }
+
+        let rx_packets = cx.local.rx_packets;
+        while let Some(packet) = rx_packets.dequeue() {
+            let buffer: heapless::Vec<u8, 128> = postcard::to_vec(&packet).unwrap();
+            serial.lock(|serial_locked| {
+                let _ = serial_locked.write(&buffer);
+            });
+        }
+        serial.lock(|serial_locked| {
+            let _ = serial_locked.flush();
+        });
+
+        task_usb_io::spawn_after(hal::rtc::Duration::millis(500)).ok();
+    }
+
+    fn decode_and_process_packets(
+        buffer: &[u8],
+        tx_led_commands: &mut Producer<bool, 16>,
+        led: &mut bsp::pins::Led,
+    ) {
+        let mut remaining = buffer;
+        while let Ok((packet, other)) = postcard::take_from_bytes::<Packet>(remaining) {
+            remaining = other;
+            match packet {
+                Packet::ReportControlTargets(packet) => {
+                    if packet.command {
+                        led.set_high();
+                    } else {
+                        led.set_low();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    #[task(binds=USB, shared=[serial, device])]
     fn usb(cx: usb::Context) {
         let device = cx.shared.device;
         let serial = cx.shared.serial;
-        let led_commands_producer = cx.local.led_commands_producer;
+
         // NOTE: Change this to always be able to produce bytes without lock maybe?
         (device, serial).lock(|device_locked, serial_locked| {
-            if device_locked.poll(&mut [serial_locked]) {
-                let mut buf = [0u8; 64];
-                match serial_locked.read(&mut buf) {
-                    Err(_e) => {
-                        //          let _ = serial_locked.write(b"Did Receive ERROR.\n");
-                        //          let _ = serial_locked.flush();
-                    }
-                    Ok(0) => {
-                        //                        let _ = serial_locked.write(b"Didn't receive data.\n");
-                        //                        let _ = serial_locked.flush();
-                    }
-                    Ok(_count) => {
-                        let mut remaining: &[u8] = &buf[0.._count];
-
-                        while let Ok((packet, other)) =
-                            postcard::take_from_bytes::<Packet>(remaining)
-                        {
-                            match packet {
-                                Packet::ReportControlTargets(packet) => {
-                                    if led_commands_producer.ready() {
-                                        led_commands_producer.enqueue(packet.command).unwrap();
-                                    }
-                                }
-                                _ => { /* current only handle this packet type */ }
-                            };
-                            // process packets
-                            remaining = other;
-                        }
-                    }
-                }
-            }
+            device_locked.poll(&mut [serial_locked]);
         });
     }
 }

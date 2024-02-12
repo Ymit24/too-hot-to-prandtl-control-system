@@ -1,4 +1,4 @@
-use fixedstr::str64;
+use fixedstr::{str64, str8};
 use serde::{Deserialize, Serialize};
 
 // TODO: Impl Display for Packet
@@ -94,7 +94,7 @@ pub struct ReportControlTargetsPacket {
 /// Represents a diagnostic log line from the embedded hardware.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ReportLogLinePacket {
-    pub log_line: str64,
+    pub log_line: str8,
 }
 
 impl RequestConnectionPacket {
