@@ -12,6 +12,18 @@ use hal::prelude::*;
 use rtic::app;
 use usbd_serial::SerialPort;
 
+mod blink;
+use blink::blink_internal;
+
+mod led_commander;
+use led_commander::led_commander_internal;
+
+mod usb_io;
+use usb_io::task_usb_io_internal;
+
+mod write_control_targets_out;
+use write_control_targets_out::*;
+
 #[app(device = bsp::pac, peripherals=true, dispatchers=[EVSYS])]
 mod app {
     use super::*;
@@ -45,6 +57,9 @@ mod app {
 
         led_commands_producer: Producer<'static, bool, 16>,
         led_commands_consumer: Consumer<'static, bool, 16>,
+
+        rx_control_frames: Consumer<'static, ReportControlTargetsPacket, 4>,
+        tx_control_frames: Producer<'static, ReportControlTargetsPacket, 4>,
     }
 
     #[monotonic(binds = RTC, default = true)]
@@ -54,7 +69,8 @@ mod app {
            usb_bus: Option<UsbBusAllocator<UsbBus>> = None,
            q: Queue<Packet,
            16> = Queue::new(),
-           led_commands_queue: Queue<bool, 16> = Queue::new()
+           led_commands_queue: Queue<bool, 16> = Queue::new(),
+           control_frame_queue: Queue<ReportControlTargetsPacket, 4> = Queue::new()
     ])]
     fn init(cx: init::Context) -> (Shared, Local, init::Monotonics) {
         let mut peripherals = cx.device;
@@ -105,9 +121,9 @@ mod app {
 
         let (tx_packets, rx_packets) = cx.local.q.split();
         let (led_commands_producer, led_commands_consumer) = cx.local.led_commands_queue.split();
+        let (tx_control_frames, rx_control_frames) = cx.local.control_frame_queue.split();
 
         blink::spawn().unwrap();
-        //send_packets::spawn().unwrap();
         task_led_commander::spawn().unwrap();
         task_usb_io::spawn().unwrap();
 
@@ -122,6 +138,8 @@ mod app {
                 led_commands_consumer,
                 led_commands_producer,
                 led,
+                tx_control_frames,
+                rx_control_frames,
             },
             init::Monotonics(rtc),
         )
@@ -129,92 +147,30 @@ mod app {
 
     #[task(local=[tx_packets])]
     fn blink(mut cx: blink::Context) {
-        let pack = Packet::ReportSensors(ReportSensorsPacket {
-            fan_speed_norm: 100,
-            pump_speed_norm: 200,
-            valve_state: ValveState::Opening,
-        });
-
         let tx_packets = cx.local.tx_packets;
-        if tx_packets.ready() {
-            let _ = tx_packets.enqueue(pack.clone());
-        }
-
-        //       let pack = Packet::ReportLogLine(ReportLogLinePacket {
-        //           log_line: str64::from("abc"),
-        //       });
-        //       if tx_packets.ready() {
-        //           tx_packets.enqueue(pack.clone()).unwrap(); // NOTE: Should always be good.
-        //       }
+        blink_internal(tx_packets);
         blink::spawn_after(hal::rtc::Duration::secs(1u32)).ok();
     }
 
-    #[task(local=[led_commands_consumer])]
+    #[task(local=[led_commands_consumer,led])]
     fn task_led_commander(mut cx: task_led_commander::Context) {
-        let consumer = cx.local.led_commands_consumer;
-        // let led = cx.local.led;
-
-        if consumer.ready() {
-            while let Some(command) = consumer.dequeue() {
-                if command {
-                    //led.set_high();
-                } else {
-                    //led.set_low();
-                }
-            }
-        }
+        led_commander_internal(cx);
 
         task_led_commander::spawn_after(hal::rtc::Duration::millis(100)).ok();
     }
 
-    #[task(shared=[serial], local=[led_commands_producer, rx_packets,led])]
-    fn task_usb_io(mut cx: task_usb_io::Context) {
-        let mut serial = cx.shared.serial;
-        let mut tx_led_commands = cx.local.led_commands_producer;
-        let led = cx.local.led;
+    #[task(local=[rx_control_frames])]
+    fn task_write_control_targets_out(cx: task_write_control_targets_out::Context) {
+        task_write_control_targets_out_internal();
 
-        let mut buf = [0u8; 128];
-        let bytes = serial.lock(|serial_locked| match serial_locked.read(&mut buf) {
-            Err(e) => 0,
-            Ok(bytes_read) => bytes_read,
-        });
-        if bytes != 0 {
-            decode_and_process_packets(&buf[0..bytes], &mut tx_led_commands, led);
-        }
-
-        let rx_packets = cx.local.rx_packets;
-        while let Some(packet) = rx_packets.dequeue() {
-            let buffer: heapless::Vec<u8, 128> = postcard::to_vec(&packet).unwrap();
-            serial.lock(|serial_locked| {
-                let _ = serial_locked.write(&buffer);
-            });
-        }
-        serial.lock(|serial_locked| {
-            let _ = serial_locked.flush();
-        });
-
-        task_usb_io::spawn_after(hal::rtc::Duration::millis(500)).ok();
+        task_write_control_targets_out::spawn_after(hal::rtc::Duration::millis(500)).ok();
     }
 
-    fn decode_and_process_packets(
-        buffer: &[u8],
-        tx_led_commands: &mut Producer<bool, 16>,
-        led: &mut bsp::pins::Led,
-    ) {
-        let mut remaining = buffer;
-        while let Ok((packet, other)) = postcard::take_from_bytes::<Packet>(remaining) {
-            remaining = other;
-            match packet {
-                Packet::ReportControlTargets(packet) => {
-                    if packet.command {
-                        led.set_high();
-                    } else {
-                        led.set_low();
-                    }
-                }
-                _ => {}
-            }
-        }
+    #[task(shared=[serial], local=[led_commands_producer, rx_packets])]
+    fn task_usb_io(mut cx: task_usb_io::Context) {
+        task_usb_io_internal(cx);
+
+        task_usb_io::spawn_after(hal::rtc::Duration::millis(500)).ok();
     }
 
     #[task(binds=USB, shared=[serial, device])]
