@@ -30,7 +30,7 @@ mod app {
     use common::packet::{ReportControlTargetsPacket, ReportLogLinePacket, *};
     use cortex_m::peripheral::NVIC;
     use fixedstr::str64;
-    use hal::pac::interrupt;
+    use hal::pac::{gclk, interrupt};
     use hal::{
         clock::{ClockGenId, ClockSource},
         pac::Interrupt,
@@ -83,7 +83,7 @@ mod app {
             &mut peripherals.NVMCTRL,
         );
 
-        let _gclk = clocks.gclk0();
+        let gclk = clocks.gclk0();
         let rtc_clock_src = clocks
             .configure_gclk_divider_and_source(ClockGenId::GCLK2, 1, ClockSource::XOSC32K, false)
             .unwrap();
@@ -122,6 +122,19 @@ mod app {
         let (tx_packets, rx_packets) = cx.local.q.split();
         let (led_commands_producer, led_commands_consumer) = cx.local.led_commands_queue.split();
         let (tx_control_frames, rx_control_frames) = cx.local.control_frame_queue.split();
+
+        let _a4 = pins.pa04.into_mode::<hal::gpio::AlternateE>();
+        let tcc0_tcc1_clock: &hal::clock::Tcc0Tcc1Clock = &clocks.tcc0_tcc1(&gclk).unwrap();
+        let mut pwm0 = hal::pwm::Pwm0::new(
+            &tcc0_tcc1_clock,
+            1u32.kHz(),
+            peripherals.TCC0,
+            &mut peripherals.PM,
+        );
+
+        let max_duty_cycle = pwm0.get_max_duty();
+        pwm0.enable(hal::pwm::Channel::_0);
+        pwm0.set_duty(hal::pwm::Channel::_0, max_duty_cycle);
 
         blink::spawn().unwrap();
         task_led_commander::spawn().unwrap();
