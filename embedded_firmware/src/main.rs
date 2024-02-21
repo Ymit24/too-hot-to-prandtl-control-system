@@ -65,6 +65,9 @@ mod app {
         tx_control_frames: Producer<'static, ReportControlTargetsPacket, 4>,
 
         pump_pwm: Pwm0,
+
+        adc_a5: hal::adc::Adc<you_must_enable_the_rt_feature_for_the_pac_in_your_cargo_toml::ADC>,
+        a0: bsp::pins::A5,
     }
 
     #[monotonic(binds = RTC, default = true)]
@@ -144,6 +147,9 @@ mod app {
         pwm0.set_duty(hal::pwm::Channel::_0, max_duty_cycle);
         pwm0.set_duty(hal::pwm::Channel::_0, max_duty_cycle / 2);
 
+        let mut adc = hal::adc::Adc::adc(peripherals.ADC, &mut peripherals.PM, &mut clocks);
+        let mut a0 = pins.pa06.into_mode::<hal::gpio::AlternateB>();
+
         blink::spawn().unwrap();
         task_led_commander::spawn().unwrap();
         task_usb_io::spawn().unwrap();
@@ -163,15 +169,16 @@ mod app {
                 tx_control_frames,
                 rx_control_frames,
                 pump_pwm: pwm0,
+                adc_a5: adc,
+                a0,
             },
             init::Monotonics(rtc),
         )
     }
 
-    #[task(local=[tx_packets])]
+    #[task(local=[tx_packets,adc_a5,a0])]
     fn blink(mut cx: blink::Context) {
-        let tx_packets = cx.local.tx_packets;
-        blink_internal(tx_packets);
+        blink_internal(cx);
         blink::spawn_after(hal::rtc::Duration::secs(1u32)).ok();
     }
 

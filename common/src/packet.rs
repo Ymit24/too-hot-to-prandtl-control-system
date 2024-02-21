@@ -33,10 +33,10 @@ pub struct AcceptConnectionPacket {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ReportSensorsPacket {
     /// Normalized representation of the fan's rpm.
-    pub fan_speed_norm: u8,
+    pub fan_speed_norm: u16,
 
     /// Normalized representation of the pump's rpm.
-    pub pump_speed_norm: u8,
+    pub pump_speed_norm: u16,
 
     /// Valve State
     pub valve_state: ValveState,
