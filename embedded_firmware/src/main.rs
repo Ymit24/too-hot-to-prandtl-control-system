@@ -3,7 +3,9 @@
 
 use arduino_mkrzero as bsp;
 use bsp::hal;
+use common::packet::Packet;
 use cortex_m::peripheral::NVIC;
+use heapless::spsc::{Consumer, Producer, Queue};
 use panic_halt as _;
 
 use bsp::entry;
@@ -20,6 +22,15 @@ use usbd_serial::{SerialPort, USB_CLASS_CDC};
 static mut USB_ALLOCATOR: Option<UsbBusAllocator<UsbBus>> = None;
 static mut USB_BUS: Option<UsbDevice<UsbBus>> = None;
 static mut USB_SERIAL: Option<SerialPort<UsbBus>> = None;
+
+static mut SEND_PACKET_QUEUE: Option<Queue<Packet, 16>> = None;
+static mut RECV_PACKET_QUEUE: Option<Queue<Packet, 16>> = None;
+
+static mut SEND_PACKET_PRODUCER: Option<Producer<Packet, 16>> = None;
+static mut SEND_PACKET_CONSUMER: Option<Consumer<Packet, 16>> = None;
+
+static mut RECV_PACKET_PRODUCER: Option<Producer<Packet, 16>> = None;
+static mut RECV_PACKET_CONSUMER: Option<Consumer<Packet, 16>> = None;
 
 #[entry]
 fn main() -> ! {
@@ -66,16 +77,22 @@ fn main() -> ! {
         NVIC::unmask(interrupt::USB);
     }
 
+    unsafe {
+        SEND_PACKET_QUEUE = Some(Queue::new());
+        (SEND_PACKET_PRODUCER, SEND_PACKET_CONSUMER)= SEND_PACKET_QUEUE.unwrap().split();
+    }
+
     loop {
-        delay.delay_ms(200u8);
+        delay.delay_ms(600u16);
         led.set_high().unwrap();
-        delay.delay_ms(200u8);
+        delay.delay_ms(600u16);
         led.set_low().unwrap();
 
         cortex_m::interrupt::free(|_| unsafe {
-            if let Some(serial) = USB_SERIAL.as_mut() {
-                let _ = serial.write("log line\r\n".as_bytes());
-            }
+            write_packets_to_usb();
+            //            if let Some(serial) = USB_SERIAL.as_mut() {
+            //                let _ = serial.write("log line\r\n".as_bytes());
+            //            }
         });
     }
 }
@@ -86,11 +103,47 @@ fn poll_usb() {
             if let Some(serial) = USB_SERIAL.as_mut() {
                 usb_dev.poll(&mut [serial]);
                 // Make the other side happy
-                let mut buf = [0u8; 16];
-                let _ = serial.read(&mut buf);
+                let mut buf = [0u8; 128];
+                let bytes_read = match serial.read(&mut buf) {
+                    Err(_) => 0,
+                    Ok(bytes_read) => bytes_read,
+                };
+
+                if bytes_read != 0 {
+                    decode_and_process_packets(&buf[0..bytes_read]);
+                }
             }
         }
     };
+}
+
+fn write_packets_to_usb() {
+    let consumer = match unsafe { SEND_PACKET_CONSUMER.as_mut() } {
+        None => return,
+        Some(consumer) => consumer,
+    };
+    let serial = match unsafe { USB_SERIAL.as_mut() } {
+        None => return,
+        Some(serial) => serial,
+    };
+
+    while let Some(packet) = consumer.dequeue() {
+        let buffer: heapless::Vec<u8, 128> = postcard::to_vec(&packet).unwrap();
+        serial.write(&buffer);
+    }
+    serial.flush();
+}
+
+fn decode_and_process_packets(buffer: &[u8]) {
+    let mut remaining = buffer;
+    while let Ok((packet, other)) = postcard::take_from_bytes::<Packet>(remaining) {
+        remaining = other;
+        unsafe {
+            if let Some(producer) = RECV_PACKET_PRODUCER.as_mut() {
+                producer.enqueue(packet);
+            }
+        }
+    }
 }
 
 #[interrupt]
