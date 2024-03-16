@@ -34,7 +34,7 @@ optional = true
 
 [dependencies.usb-device]
 version = "0.2.0"
-optional=true
+optional = true
 
 [features]
 default = ["rt", "atsamd-hal/samd21g", "usb"]
@@ -51,5 +51,5 @@ lto = true
 
 [[bin]]
 name = "embedded_firmware"
-test = false
+test = true
 bench = false
