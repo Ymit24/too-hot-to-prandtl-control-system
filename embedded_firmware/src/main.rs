@@ -1,9 +1,10 @@
-#![no_std]
+#![cfg_attr(not(test), no_std)]
 #![no_main]
 
 use arduino_mkrzero as bsp;
 use bsp::hal;
 
+#[cfg(target_arch = "arm")]
 use panic_halt as _;
 
 use hal::clock::GenericClockController;
@@ -65,6 +66,7 @@ mod app {
         tx_control_frames: Producer<'static, ReportControlTargetsPacket, 4>,
 
         pump_pwm: Pwm0,
+        fan_pwm: hal::pwm::Pwm1,
 
         adc_a5: hal::adc::Adc<you_must_enable_the_rt_feature_for_the_pac_in_your_cargo_toml::ADC>,
         a0: bsp::pins::A5,
@@ -131,8 +133,9 @@ mod app {
         let (led_commands_producer, led_commands_consumer) = cx.local.led_commands_queue.split();
         let (tx_control_frames, rx_control_frames) = cx.local.control_frame_queue.split();
 
-        let _a4 = pins.pa04.into_mode::<hal::gpio::AlternateE>();
-        let _a5 = pins.pa05.into_mode::<hal::gpio::AlternateE>();
+        // let _a4 = pins.pa04.into_mode::<hal::gpio::AlternateE>();
+        let _a5 = pins.pa05.into_mode::<hal::gpio::AlternateE>(); // fan ctrl pwm01
+        let _a6 = pins.pa07.into_mode::<hal::gpio::AlternateE>(); // pump ctrl pwm11
         let tcc0_tcc1_clock: &hal::clock::Tcc0Tcc1Clock = &clocks.tcc0_tcc1(&gclk).unwrap();
         let mut pwm0 = hal::pwm::Pwm0::new(
             &tcc0_tcc1_clock,
@@ -140,12 +143,26 @@ mod app {
             peripherals.TCC0,
             &mut peripherals.PM,
         );
+        let mut pwm1 = hal::pwm::Pwm1::new(
+            &tcc0_tcc1_clock,
+            1u32.kHz(),
+            peripherals.TCC1,
+            &mut peripherals.PM,
+        );
 
         let max_duty_cycle = pwm0.get_max_duty();
-        pwm0.enable(hal::pwm::Channel::_0);
+        // pwm0.enable(hal::pwm::Channel::_0); // this is ADC
         pwm0.enable(hal::pwm::Channel::_1);
-        pwm0.set_duty(hal::pwm::Channel::_0, max_duty_cycle);
-        pwm0.set_duty(hal::pwm::Channel::_0, max_duty_cycle / 2);
+        // pwm0.enable(hal::pwm::Channel::_0); // this is adc
+        pwm0.enable(hal::pwm::Channel::_1);
+        pwm0.set_duty(
+            hal::pwm::Channel::_1,
+            ((max_duty_cycle as f32) * 0.75f32) as u32,
+        );
+        pwm1.set_duty(
+            hal::pwm::Channel::_1,
+            ((max_duty_cycle as f32) * 0.75f32) as u32,
+        );
 
         let mut adc = hal::adc::Adc::adc(peripherals.ADC, &mut peripherals.PM, &mut clocks);
         let mut a0 = pins.pa06.into_mode::<hal::gpio::AlternateB>();
@@ -169,6 +186,7 @@ mod app {
                 tx_control_frames,
                 rx_control_frames,
                 pump_pwm: pwm0,
+                fan_pwm: pwm1,
                 adc_a5: adc,
                 a0,
             },
@@ -189,7 +207,7 @@ mod app {
         task_led_commander::spawn_after(hal::rtc::Duration::millis(100)).ok();
     }
 
-    #[task(local=[rx_control_frames,pump_pwm])]
+    #[task(local=[rx_control_frames,pump_pwm, fan_pwm])]
     fn task_write_control_targets_out(cx: task_write_control_targets_out::Context) {
         task_write_control_targets_out_internal(cx);
 

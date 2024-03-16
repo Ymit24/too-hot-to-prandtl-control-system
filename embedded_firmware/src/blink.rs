@@ -9,7 +9,8 @@ pub fn blink_internal(cx: blink::Context) {
     let adc = cx.local.adc_a5;
     let mut a0 = cx.local.a0;
 
-    let data: u16 = adc.read(a0).unwrap();
+    // let data: u16 = adc.read(a0).unwrap();
+    let data: u16 = 0;
 
     let pack = Packet::ReportSensors(ReportSensorsPacket {
         fan_speed_norm: data,

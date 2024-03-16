@@ -42,9 +42,6 @@ mod testing {
     #[test]
     fn test_generate_control_frame() {
         // NOTE: EXAMPLE TEST
-
-        todo!("Write actual test!");
-
         let client = ClientSensorData {
             pump_speed: Rpm::try_from(3100).expect("Failed to generate rpm"),
         };
