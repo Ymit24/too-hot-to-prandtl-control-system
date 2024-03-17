@@ -5,6 +5,7 @@ use arduino_mkrzero as bsp;
 use bsp::hal;
 use common::packet::Packet;
 use cortex_m::peripheral::NVIC;
+use embedded_firmware_core::get_valve_state;
 use heapless::spsc::{Consumer, Producer, Queue};
 use panic_halt as _;
 
@@ -32,8 +33,7 @@ static mut SEND_PACKET_CONSUMER: Option<Consumer<Packet, 16>> = None;
 static mut RECV_PACKET_PRODUCER: Option<Producer<Packet, 16>> = None;
 static mut RECV_PACKET_CONSUMER: Option<Consumer<Packet, 16>> = None;
 
-#[entry]
-fn main() -> ! {
+fn initialize() {
     let mut peripherals = Peripherals::take().unwrap();
     let mut core = CorePeripherals::take().unwrap();
     let mut clocks = GenericClockController::with_external_32kosc(
@@ -79,14 +79,19 @@ fn main() -> ! {
 
     unsafe {
         SEND_PACKET_QUEUE = Some(Queue::new());
-        (SEND_PACKET_PRODUCER, SEND_PACKET_CONSUMER)= SEND_PACKET_QUEUE.unwrap().split();
+//        (SEND_PACKET_PRODUCER, SEND_PACKET_CONSUMER)= SEND_PACKET_QUEUE.unwrap().split();
     }
+}
+
+#[entry]
+fn main() -> ! {
+    initialize();
 
     loop {
-        delay.delay_ms(600u16);
-        led.set_high().unwrap();
-        delay.delay_ms(600u16);
-        led.set_low().unwrap();
+//        delay.delay_ms(600u16);
+//        led.set_high().unwrap();
+//        delay.delay_ms(600u16);
+//        led.set_low().unwrap();
 
         cortex_m::interrupt::free(|_| unsafe {
             write_packets_to_usb();

@@ -18,6 +18,9 @@ serde = {version="1.0.196", default-features=false}
 heapless = "0.7.0"
 fixedstr = { version= "0.5.5", features=["no-alloc", "serde"]}
 
+[dependencies.embedded_firmware_core]
+path = "../embedded_firmware_core"
+
 [dependencies.common]
 path = "../common"
 

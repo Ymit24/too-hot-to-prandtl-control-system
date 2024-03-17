@@ -420,6 +420,7 @@ dependencies = [
  "cortex-m-rtic",
  "cortex-m-semihosting 0.5.0",
  "embedded-hal",
+ "embedded_firmware_core",
  "fixedstr",
  "heapless",
  "panic-halt",
@@ -428,6 +429,17 @@ dependencies = [
  "serde",
  "usb-device",
  "usbd-serial",
+]
+
+[[package]]
+name = "embedded_firmware_core"
+version = "0.1.0"
+dependencies = [
+ "common",
+ "embedded-hal",
+ "heapless",
+ "postcard",
+ "serde",
 ]
 
 [[package]]
