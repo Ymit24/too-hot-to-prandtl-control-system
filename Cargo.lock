@@ -435,11 +435,14 @@ dependencies = [
 name = "embedded_firmware_core"
 version = "0.1.0"
 dependencies = [
+ "bare-metal 0.2.5",
  "common",
  "embedded-hal",
  "heapless",
  "postcard",
  "serde",
+ "usb-device",
+ "usbd-serial",
 ]
 
 [[package]]

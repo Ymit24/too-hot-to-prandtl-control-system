@@ -3,35 +3,24 @@
 
 use arduino_mkrzero as bsp;
 use bsp::hal;
+use bsp::pins::Led;
 use common::packet::Packet;
 use cortex_m::peripheral::NVIC;
-use embedded_firmware_core::get_valve_state;
-use heapless::spsc::{Consumer, Producer, Queue};
+use embedded_firmware_core::Application;
+use embedded_hal::blocking::delay::DelayMs;
+use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
 use panic_halt as _;
 
 use bsp::entry;
 use hal::clock::GenericClockController;
 use hal::delay::Delay;
 use hal::pac::{interrupt, CorePeripherals, Peripherals};
-use hal::prelude::*;
 use hal::usb::UsbBus;
 
 use usb_device::bus::UsbBusAllocator;
-use usb_device::device::{UsbDevice, UsbDeviceBuilder, UsbVidPid};
-use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
-static mut USB_ALLOCATOR: Option<UsbBusAllocator<UsbBus>> = None;
-static mut USB_BUS: Option<UsbDevice<UsbBus>> = None;
-static mut USB_SERIAL: Option<SerialPort<UsbBus>> = None;
-
-static mut SEND_PACKET_QUEUE: Option<Queue<Packet, 16>> = None;
-static mut RECV_PACKET_QUEUE: Option<Queue<Packet, 16>> = None;
-
-static mut SEND_PACKET_PRODUCER: Option<Producer<Packet, 16>> = None;
-static mut SEND_PACKET_CONSUMER: Option<Consumer<Packet, 16>> = None;
-
-static mut RECV_PACKET_PRODUCER: Option<Producer<Packet, 16>> = None;
-static mut RECV_PACKET_CONSUMER: Option<Consumer<Packet, 16>> = None;
+static mut BUS_ALLOCATOR: Option<UsbBusAllocator<UsbBus>> = None;
+static mut APPLICATION: Option<Application<'static, UsbBus, Delay, Led>> = None;
 
 fn initialize() {
     let mut peripherals = Peripherals::take().unwrap();
@@ -49,37 +38,30 @@ fn initialize() {
     let usb_n = bsp::pin_alias!(pins.usb_n);
     let usb_p = bsp::pin_alias!(pins.usb_p);
 
-    let bus_allocator = unsafe {
-        USB_ALLOCATOR = Some(bsp::usb::usb_allocator(
+    // this stays
+    unsafe {
+        BUS_ALLOCATOR = Some(bsp::usb::usb_allocator(
             peripherals.USB,
             &mut clocks,
             &mut peripherals.PM,
             usb_n.into(),
             usb_p.into(),
         ));
-        USB_ALLOCATOR.as_ref().unwrap()
-    };
-
-    unsafe {
-        USB_SERIAL = Some(SerialPort::new(bus_allocator));
-        USB_BUS = Some(
-            UsbDeviceBuilder::new(bus_allocator, UsbVidPid(0x2222, 0x3333))
-                .manufacturer("LA Tech")
-                .product("Too Hot To Prandtl Controller")
-                .serial_number("1324")
-                .device_class(USB_CLASS_CDC)
-                .build(),
-        );
     }
 
+    // NOTE: This must happen before we enable USB interrupt.
+    unsafe {
+        APPLICATION = Some(Application::new(
+            BUS_ALLOCATOR.as_ref().unwrap(),
+            delay,
+            led,
+        ));
+    }
+
+    // this stays
     unsafe {
         core.NVIC.set_priority(interrupt::USB, 1);
         NVIC::unmask(interrupt::USB);
-    }
-
-    unsafe {
-        SEND_PACKET_QUEUE = Some(Queue::new());
-//        (SEND_PACKET_PRODUCER, SEND_PACKET_CONSUMER)= SEND_PACKET_QUEUE.unwrap().split();
     }
 }
 
@@ -87,290 +69,48 @@ fn initialize() {
 fn main() -> ! {
     initialize();
 
+    let app = unsafe { APPLICATION.as_mut().unwrap() };
+
+    let mut counter = 0;
+
     loop {
-//        delay.delay_ms(600u16);
-//        led.set_high().unwrap();
-//        delay.delay_ms(600u16);
-//        led.set_low().unwrap();
-
-        cortex_m::interrupt::free(|_| unsafe {
-            write_packets_to_usb();
-            //            if let Some(serial) = USB_SERIAL.as_mut() {
-            //                let _ = serial.write("log line\r\n".as_bytes());
-            //            }
+        cortex_m::interrupt::free(|cs| unsafe {
+            app.read_packets_from_usb(cs);
+            app.write_packets_to_usb(cs);
         });
-    }
-}
 
-fn poll_usb() {
-    unsafe {
-        if let Some(usb_dev) = USB_BUS.as_mut() {
-            if let Some(serial) = USB_SERIAL.as_mut() {
-                usb_dev.poll(&mut [serial]);
-                // Make the other side happy
-                let mut buf = [0u8; 128];
-                let bytes_read = match serial.read(&mut buf) {
-                    Err(_) => 0,
-                    Ok(bytes_read) => bytes_read,
-                };
+        counter += 1;
+        if counter >= 4 {
+            counter -= 4;
+            // app.led.toggle();
 
-                if bytes_read != 0 {
-                    decode_and_process_packets(&buf[0..bytes_read]);
+            while let Some(packet) = app.incoming_packets.pop() {
+                match packet {
+                    Packet::ReportControlTargets(control_packet) => {
+                        app.led.set_state(control_packet.command.into());
+                    }
+                    _ => {}
                 }
             }
-        }
-    };
-}
 
-fn write_packets_to_usb() {
-    let consumer = match unsafe { SEND_PACKET_CONSUMER.as_mut() } {
-        None => return,
-        Some(consumer) => consumer,
-    };
-    let serial = match unsafe { USB_SERIAL.as_mut() } {
-        None => return,
-        Some(serial) => serial,
-    };
-
-    while let Some(packet) = consumer.dequeue() {
-        let buffer: heapless::Vec<u8, 128> = postcard::to_vec(&packet).unwrap();
-        serial.write(&buffer);
-    }
-    serial.flush();
-}
-
-fn decode_and_process_packets(buffer: &[u8]) {
-    let mut remaining = buffer;
-    while let Ok((packet, other)) = postcard::take_from_bytes::<Packet>(remaining) {
-        remaining = other;
-        unsafe {
-            if let Some(producer) = RECV_PACKET_PRODUCER.as_mut() {
-                producer.enqueue(packet);
+            for i in 0..2 {
+                app.outgoing_packets.push(Packet::ReportSensors(
+                    common::packet::ReportSensorsPacket {
+                        fan_speed_norm: 100,
+                        pump_speed_norm: 200,
+                        valve_state: common::packet::ValveState::Open,
+                    },
+                ));
             }
         }
+
+        app.delay.delay_ms(100u16);
     }
 }
 
 #[interrupt]
 fn USB() {
-    poll_usb();
-}
-
-/*
-#[app(device = bsp::pac, peripherals=true, dispatchers=[EVSYS])]
-mod app {
-    use super::*;
-    use common::packet::{ReportControlTargetsPacket, ReportLogLinePacket, *};
-    use cortex_m::peripheral::NVIC;
-    use fixedstr::str64;
-    use hal::pac::interrupt;
-    use hal::{
-        clock::{ClockGenId, ClockSource},
-        pac::Interrupt,
-        rtc::Count32Mode,
-        usb::usb_device::class_prelude::UsbBusAllocator,
-        usb::UsbBus,
-    };
-    use heapless::spsc::{Consumer, Producer, Queue};
-    use usb_device::device::{UsbDevice, UsbDeviceBuilder, UsbVidPid};
-    use usb_device::UsbError;
-    use usbd_serial::{SerialPort, USB_CLASS_CDC};
-    #[shared]
-    struct Shared {
-        device: UsbDevice<'static, UsbBus>,
-        serial: SerialPort<'static, UsbBus>,
-    }
-
-    #[local]
-    struct Local {
-        tx_packets: Producer<'static, Packet, 16>, // TODO: MIGHT CHANGE TO JUST THE BUF
-        rx_packets: Consumer<'static, Packet, 16>,
-
-        led: bsp::pins::Led,
-
-        led_commands_producer: Producer<'static, bool, 16>,
-        led_commands_consumer: Consumer<'static, bool, 16>,
-    }
-
-    #[monotonic(binds = RTC, default = true)]
-    type RtcMonotonic = hal::rtc::Rtc<Count32Mode>;
-
-    #[init(local=[
-           usb_bus: Option<UsbBusAllocator<UsbBus>> = None,
-           q: Queue<Packet,
-           16> = Queue::new(),
-           led_commands_queue: Queue<bool, 16> = Queue::new()
-    ])]
-    fn init(cx: init::Context) -> (Shared, Local, init::Monotonics) {
-        let mut peripherals = cx.device;
-        let pins = bsp::pins::Pins::new(peripherals.PORT);
-        let mut core = cx.core;
-        let mut clocks = GenericClockController::with_external_32kosc(
-            peripherals.GCLK,
-            &mut peripherals.PM,
-            &mut peripherals.SYSCTRL,
-            &mut peripherals.NVMCTRL,
-        );
-
-        let _gclk = clocks.gclk0();
-        let rtc_clock_src = clocks
-            .configure_gclk_divider_and_source(ClockGenId::GCLK2, 1, ClockSource::XOSC32K, false)
-            .unwrap();
-        clocks.configure_standby(ClockGenId::GCLK2, true);
-        let rtc_clock = clocks.rtc(&rtc_clock_src).unwrap();
-        let rtc =
-            hal::rtc::Rtc::count32_mode(peripherals.RTC, rtc_clock.freq(), &mut peripherals.PM);
-
-        let led = bsp::pin_alias!(pins.led).into();
-        let usb_n = bsp::pin_alias!(pins.usb_n);
-        let usb_p = bsp::pin_alias!(pins.usb_p);
-
-        let usb_bus: &'static _ = cx.local.usb_bus.insert(bsp::usb::usb_allocator(
-            peripherals.USB,
-            &mut clocks,
-            &mut peripherals.PM,
-            usb_n.into(),
-            usb_p.into(),
-        ));
-
-        let serial_port = SerialPort::new(usb_bus);
-        let device = UsbDeviceBuilder::new(usb_bus, UsbVidPid(0x2222, 0x3333))
-            .manufacturer("LA Tech")
-            .product("Too Hot To Prandtl Controller")
-            .serial_number("1324")
-            .device_class(USB_CLASS_CDC)
-            .build();
-
-        unsafe {
-            core.NVIC.set_priority(interrupt::USB, 1);
-            NVIC::unmask(interrupt::USB);
-        }
-
-        core.SCB.set_sleepdeep();
-
-        let (tx_packets, rx_packets) = cx.local.q.split();
-        let (led_commands_producer, led_commands_consumer) = cx.local.led_commands_queue.split();
-
-        blink::spawn().unwrap();
-        //send_packets::spawn().unwrap();
-        task_led_commander::spawn().unwrap();
-        task_usb_io::spawn().unwrap();
-
-        (
-            Shared {
-                device,
-                serial: serial_port,
-            },
-            Local {
-                tx_packets,
-                rx_packets,
-                led_commands_consumer,
-                led_commands_producer,
-                led,
-            },
-            init::Monotonics(rtc),
-        )
-    }
-
-    #[task(local=[tx_packets])]
-    fn blink(mut cx: blink::Context) {
-        let pack = Packet::ReportSensors(ReportSensorsPacket {
-            fan_speed_norm: 100,
-            pump_speed_norm: 200,
-            valve_state: ValveState::Opening,
-        });
-
-        let tx_packets = cx.local.tx_packets;
-        if tx_packets.ready() {
-            let _ = tx_packets.enqueue(pack.clone());
-        }
-
-        //       let pack = Packet::ReportLogLine(ReportLogLinePacket {
-        //           log_line: str64::from("abc"),
-        //       });
-        //       if tx_packets.ready() {
-        //           tx_packets.enqueue(pack.clone()).unwrap(); // NOTE: Should always be good.
-        //       }
-        blink::spawn_after(hal::rtc::Duration::secs(1u32)).ok();
-    }
-
-    #[task(local=[led_commands_consumer])]
-    fn task_led_commander(mut cx: task_led_commander::Context) {
-        let consumer = cx.local.led_commands_consumer;
-        // let led = cx.local.led;
-
-        if consumer.ready() {
-            while let Some(command) = consumer.dequeue() {
-                if command {
-                    //led.set_high();
-                } else {
-                    //led.set_low();
-                }
-            }
-        }
-
-        task_led_commander::spawn_after(hal::rtc::Duration::millis(100)).ok();
-    }
-
-    #[task(shared=[serial], local=[led_commands_producer, rx_packets,led])]
-    fn task_usb_io(mut cx: task_usb_io::Context) {
-        let mut serial = cx.shared.serial;
-        let mut tx_led_commands = cx.local.led_commands_producer;
-        let led = cx.local.led;
-
-        let mut buf = [0u8; 128];
-        let bytes = serial.lock(|serial_locked| match serial_locked.read(&mut buf) {
-            Err(e) => 0,
-            Ok(bytes_read) => bytes_read,
-        });
-        if bytes != 0 {
-            decode_and_process_packets(&buf[0..bytes], &mut tx_led_commands, led);
-        }
-
-        let rx_packets = cx.local.rx_packets;
-        while let Some(packet) = rx_packets.dequeue() {
-            let buffer: heapless::Vec<u8, 128> = postcard::to_vec(&packet).unwrap();
-            serial.lock(|serial_locked| {
-                let _ = serial_locked.write(&buffer);
-            });
-        }
-        serial.lock(|serial_locked| {
-            let _ = serial_locked.flush();
-        });
-
-        task_usb_io::spawn_after(hal::rtc::Duration::millis(500)).ok();
-    }
-
-    fn decode_and_process_packets(
-        buffer: &[u8],
-        tx_led_commands: &mut Producer<bool, 16>,
-        led: &mut bsp::pins::Led,
-    ) {
-        let mut remaining = buffer;
-        while let Ok((packet, other)) = postcard::take_from_bytes::<Packet>(remaining) {
-            remaining = other;
-            match packet {
-                Packet::ReportControlTargets(packet) => {
-                    if packet.command {
-                        led.set_high();
-                    } else {
-                        led.set_low();
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    #[task(binds=USB, shared=[serial, device])]
-    fn usb(cx: usb::Context) {
-        let device = cx.shared.device;
-        let serial = cx.shared.serial;
-
-        // NOTE: Change this to always be able to produce bytes without lock maybe?
-        (device, serial).lock(|device_locked, serial_locked| {
-            device_locked.poll(&mut [serial_locked]);
-        });
+    unsafe {
+        APPLICATION.as_mut().unwrap().poll_usb();
     }
 }
-*/
