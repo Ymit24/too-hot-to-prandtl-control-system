@@ -65,6 +65,12 @@ fn initialize() {
     }
 }
 
+// TODO: Finish feature parity with RTIC version.
+// [ ] PWM Pump/Fan control
+// [ ] ADC Pump/Fan input
+// [ ] Valve digital output
+// [ ] Valve digital input (determine valve state)
+
 #[entry]
 fn main() -> ! {
     initialize();
