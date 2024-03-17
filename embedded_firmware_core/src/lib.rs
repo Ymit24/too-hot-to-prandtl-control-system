@@ -1,32 +1,15 @@
 #![cfg_attr(not(test), no_std)]
 
-use core::convert::Infallible;
-
 use bare_metal::CriticalSection;
-use common::packet::{Packet, ValveState};
-use embedded_hal::{
-    blocking::delay::DelayMs,
-    digital::v2::{InputPin, OutputPin},
-};
+use common::packet::Packet;
+use embedded_hal::{blocking::delay::DelayMs, digital::v2::OutputPin};
 use heapless::Vec;
-use usbd_serial::{SerialPort, USB_CLASS_CDC};
-
-/// This function determines the valve state from hardware.
-pub fn get_valve_state(valve_opened_pin: &dyn InputPin<Error = Infallible>) -> Option<ValveState> {
-    match valve_opened_pin.is_high() {
-        Ok(is_high) => Some(match is_high {
-            true => ValveState::Open,
-            false => ValveState::Closed,
-        }),
-        Err(_) => None,
-    }
-}
-
 use usb_device::{
     bus::UsbBus,
     class_prelude::UsbBusAllocator,
     device::{UsbDevice, UsbDeviceBuilder, UsbVidPid},
 };
+use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
 pub struct Application<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin> {
     pub serial_port: SerialPort<'a, B>,
@@ -67,6 +50,7 @@ impl<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin> Application<'a, B, D, L> {
 
     /// This function will read as many packets from USB as ready.
     /// NOTE: This function MUST be called from a critical section.
+    /// TODO: TEST
     pub fn read_packets_from_usb(&mut self, _cs: &CriticalSection) {
         let mut buffer = [0u8; 128];
         let recv_bytes = match self.serial_port.read(&mut buffer) {
@@ -81,6 +65,7 @@ impl<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin> Application<'a, B, D, L> {
     /// Write all outgoing packets to USB. This function ignores write and flush
     /// errors. (Packets may be dropped without warning).
     /// NOTE: This function MUST be called from a critical section.
+    /// TODO: TEST
     pub fn write_packets_to_usb(&mut self, _cs: &CriticalSection) {
         while let Some(packet) = self.outgoing_packets.pop() {
             let buffer: Vec<u8, 128> = postcard::to_vec(&packet).unwrap();
@@ -94,6 +79,7 @@ impl<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin> Application<'a, B, D, L> {
     /// In the case of strange alignment this COULD POTENTIALLY
     /// drop data or cause corruption.
     /// If the incoming packet vec is full then they will simply be ignored.
+    /// TODO: TEST
     fn decode_bytes(&mut self, buffer: &[u8]) {
         let mut remaining = buffer;
         while let Ok((packet, other)) = postcard::take_from_bytes::<Packet>(remaining) {
@@ -104,34 +90,4 @@ impl<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin> Application<'a, B, D, L> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct DummyPin<const IS_HIGH: bool>;
-
-    impl<const IS_HIGH: bool> InputPin for DummyPin<IS_HIGH> {
-        type Error = Infallible;
-
-        fn is_high(&self) -> Result<bool, Self::Error> {
-            Ok(IS_HIGH)
-        }
-
-        fn is_low(&self) -> Result<bool, Self::Error> {
-            Ok(!IS_HIGH)
-        }
-    }
-
-    #[test]
-    fn get_valve_state_returns_opened() {
-        let pin: DummyPin<true> = DummyPin;
-        let result = get_valve_state(&pin);
-        assert_eq!(result, Some(ValveState::Open));
-    }
-
-    #[test]
-    fn get_valve_state_returns_closed() {
-        let pin: DummyPin<false> = DummyPin;
-        let result = get_valve_state(&pin);
-        assert_eq!(result, Some(ValveState::Closed));
-    }
-}
+mod tests {}
