@@ -33,7 +33,13 @@ pub struct Application<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin> {
     pub usb_device: UsbDevice<'a, B>,
     pub delay: D,
     pub led: L,
+
+    // NOTE: FOR DEBUG SHOULD BE PRIVATE
+    /// Represents a queue of packets which have been received.
     pub incoming_packets: Vec<Packet, 16>,
+
+    // NOTE: FOR DEBUG SHOULD BE PRIVATE
+    /// Represents a queue of packets which need to be sent.
     pub outgoing_packets: Vec<Packet, 16>,
 }
 

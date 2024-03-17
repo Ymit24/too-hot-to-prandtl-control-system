@@ -71,6 +71,7 @@ fn main() -> ! {
 
     let app = unsafe { APPLICATION.as_mut().unwrap() };
 
+    // NOTE: DEBUG CODE
     let mut counter = 0;
 
     loop {
@@ -79,11 +80,12 @@ fn main() -> ! {
             app.write_packets_to_usb(cs);
         });
 
+        // NOTE: DEBUG CODE
         counter += 1;
         if counter >= 4 {
             counter -= 4;
-            // app.led.toggle();
 
+            // NOTE: DEBUG CODE
             while let Some(packet) = app.incoming_packets.pop() {
                 match packet {
                     Packet::ReportControlTargets(control_packet) => {
@@ -93,6 +95,7 @@ fn main() -> ! {
                 }
             }
 
+            // NOTE: DEBUG CODE
             for i in 0..2 {
                 app.outgoing_packets.push(Packet::ReportSensors(
                     common::packet::ReportSensorsPacket {
