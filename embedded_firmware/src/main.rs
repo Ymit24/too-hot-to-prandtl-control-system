@@ -8,19 +8,24 @@ use common::packet::Packet;
 use cortex_m::peripheral::NVIC;
 use embedded_firmware_core::Application;
 use embedded_hal::blocking::delay::DelayMs;
-use embedded_hal::digital::v2::{OutputPin, ToggleableOutputPin};
+use embedded_hal::digital::v2::OutputPin;
+use hal::adc::Adc;
+use hal::gpio::{Alternate, Pin, B, PA06};
+use hal::pwm::{Channel, Pwm0, Pwm1};
 use panic_halt as _;
 
 use bsp::entry;
 use hal::clock::GenericClockController;
 use hal::delay::Delay;
-use hal::pac::{interrupt, CorePeripherals, Peripherals};
+use hal::pac::{interrupt, CorePeripherals, Peripherals, ADC};
 use hal::usb::UsbBus;
+use hal::{gpio, prelude::*};
 
 use usb_device::bus::UsbBusAllocator;
 
 static mut BUS_ALLOCATOR: Option<UsbBusAllocator<UsbBus>> = None;
-static mut APPLICATION: Option<Application<'static, UsbBus, Delay, Led>> = None;
+static mut APPLICATION: Option<Application<'static, UsbBus, Delay, Led, Pwm0, Pwm1, Adc<ADC>>> =
+    None;
 
 fn initialize() {
     let mut peripherals = Peripherals::take().unwrap();
@@ -34,6 +39,11 @@ fn initialize() {
     let pins = bsp::pins::Pins::new(peripherals.PORT);
     let mut led = bsp::pin_alias!(pins.led).into_push_pull_output();
     let mut delay = Delay::new(core.SYST, &mut clocks);
+
+    // Setup the fan & pump pwm pins
+    // TODO: Extract to function
+    let _fan_ctrl_pwm0_pin = pins.pa05.into_mode::<hal::gpio::AlternateE>(); // fan ctrl pwm01
+    let _pump_ctrl_pwm1_pin = pins.pa07.into_mode::<hal::gpio::AlternateE>(); // pump ctrl pwm1
 
     let usb_n = bsp::pin_alias!(pins.usb_n);
     let usb_p = bsp::pin_alias!(pins.usb_p);
@@ -49,12 +59,40 @@ fn initialize() {
         ));
     }
 
+    // Setup PWM for pump and fan
+    // TODO: Extract to fn
+    let gclk = clocks.gclk0();
+    let tcc0_tcc1_clock: &hal::clock::Tcc0Tcc1Clock = &clocks.tcc0_tcc1(&gclk).unwrap();
+    let mut pump_pwm = hal::pwm::Pwm0::new(
+        &tcc0_tcc1_clock,
+        1u32.kHz(),
+        peripherals.TCC0,
+        &mut peripherals.PM,
+    );
+    let mut fan_pwm = hal::pwm::Pwm1::new(
+        &tcc0_tcc1_clock,
+        1u32.kHz(),
+        peripherals.TCC1,
+        &mut peripherals.PM,
+    );
+
+    pump_pwm.enable(Channel::_1);
+    fan_pwm.enable(Channel::_1);
+
+    let mut adc = Adc::adc(peripherals.ADC, &mut peripherals.PM, &mut clocks);
+    let mut a0 = pins.pa06.into_mode::<gpio::AlternateB>();
+
     // NOTE: This must happen before we enable USB interrupt.
     unsafe {
         APPLICATION = Some(Application::new(
             BUS_ALLOCATOR.as_ref().unwrap(),
             delay,
             led,
+            pump_pwm,
+            fan_pwm,
+            Channel::_1,
+            Channel::_1,
+            adc,
         ));
     }
 

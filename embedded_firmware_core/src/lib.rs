@@ -2,7 +2,7 @@
 
 use bare_metal::CriticalSection;
 use common::packet::Packet;
-use embedded_hal::{blocking::delay::DelayMs, digital::v2::OutputPin};
+use embedded_hal::{blocking::delay::DelayMs, digital::v2::OutputPin, Pwm};
 use heapless::Vec;
 use usb_device::{
     bus::UsbBus,
@@ -11,11 +11,17 @@ use usb_device::{
 };
 use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
-pub struct Application<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin> {
+pub struct Application<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin, P1: Pwm, P2: Pwm, A> {
     pub serial_port: SerialPort<'a, B>,
     pub usb_device: UsbDevice<'a, B>,
+
     pub delay: D,
     pub led: L,
+
+    pub pump_pwm: P1,
+    pub fan_pwm: P2,
+
+    pub adc: A,
 
     // NOTE: FOR DEBUG SHOULD BE PRIVATE
     /// Represents a queue of packets which have been received.
@@ -26,8 +32,34 @@ pub struct Application<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin> {
     pub outgoing_packets: Vec<Packet, 16>,
 }
 
-impl<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin> Application<'a, B, D, L> {
-    pub fn new(bus_allocator: &'a UsbBusAllocator<B>, delay: D, led_pin: L) -> Self {
+use embedded_hal::prelude::*;
+
+impl<
+        'a,
+        B: UsbBus,
+        D: DelayMs<u16>,
+        L: OutputPin,
+        P1: Pwm<Channel = impl Clone, Duty = u32>,
+        P2: Pwm<Channel = impl Clone, Duty = u32>,
+        A,
+    > Application<'a, B, D, L, P1, P2, A>
+{
+    pub fn new(
+        bus_allocator: &'a UsbBusAllocator<B>,
+        delay: D,
+        led_pin: L,
+        mut pump_pwm: P1,
+        mut fan_pwm: P2,
+        pump_channel: P1::Channel,
+        fan_channel: P2::Channel,
+        adc: A,
+    ) -> Self {
+        pump_pwm.enable(pump_channel.clone());
+        fan_pwm.enable(fan_channel.clone());
+
+        pump_pwm.set_duty(pump_channel, pump_pwm.get_max_duty() / 2u32);
+        fan_pwm.set_duty(fan_channel, fan_pwm.get_max_duty() / 2);
+
         Self {
             serial_port: SerialPort::new(&bus_allocator),
             usb_device: UsbDeviceBuilder::new(bus_allocator, UsbVidPid(0x2222, 0x3333))
@@ -38,6 +70,9 @@ impl<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin> Application<'a, B, D, L> {
                 .build(),
             delay,
             led: led_pin,
+            pump_pwm,
+            fan_pwm,
+            adc,
             incoming_packets: Vec::new(),
             outgoing_packets: Vec::new(),
         }
