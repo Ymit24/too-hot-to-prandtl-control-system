@@ -11,15 +11,7 @@ use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
 use crate::PrandtlAdc;
 
-pub struct Application<
-    'a,
-    B: UsbBus,
-    D: DelayMs<u16>,
-    L: OutputPin,
-    P1: Pwm,
-    P2: Pwm,
-    PAdc: PrandtlAdc,
-> {
+pub struct Application<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin, P1: Pwm, PAdc: PrandtlAdc> {
     pub serial_port: SerialPort<'a, B>,
     pub usb_device: UsbDevice<'a, B>,
 
@@ -27,7 +19,6 @@ pub struct Application<
     pub led: L,
 
     pub pump_pwm: P1,
-    pub fan_pwm: P2,
 
     pub padc: PAdc,
 
@@ -46,25 +37,23 @@ impl<
         D: DelayMs<u16>,
         L: OutputPin,
         P1: Pwm<Channel = impl Clone, Duty = u32>,
-        P2: Pwm<Channel = impl Clone, Duty = u32>,
         PAdc: PrandtlAdc,
-    > Application<'a, B, D, L, P1, P2, PAdc>
+    > Application<'a, B, D, L, P1, PAdc>
 {
     pub fn new(
         bus_allocator: &'a UsbBusAllocator<B>,
         delay: D,
         led_pin: L,
         mut pump_pwm: P1,
-        mut fan_pwm: P2,
         pump_channel: P1::Channel,
-        fan_channel: P2::Channel,
+        fan_channel: P1::Channel,
         padc: PAdc,
     ) -> Self {
         pump_pwm.enable(pump_channel.clone());
-        fan_pwm.enable(fan_channel.clone());
+        pump_pwm.enable(fan_channel.clone());
 
-        pump_pwm.set_duty(pump_channel, pump_pwm.get_max_duty() / 2u32);
-        fan_pwm.set_duty(fan_channel, fan_pwm.get_max_duty() / 2);
+        pump_pwm.set_duty(pump_channel, pump_pwm.get_max_duty() * 0);
+        pump_pwm.set_duty(fan_channel, pump_pwm.get_max_duty() * 0);
 
         Self {
             serial_port: SerialPort::new(&bus_allocator),
@@ -77,7 +66,6 @@ impl<
             delay,
             led: led_pin,
             pump_pwm,
-            fan_pwm,
             padc,
             incoming_packets: Vec::new(),
             outgoing_packets: Vec::new(),

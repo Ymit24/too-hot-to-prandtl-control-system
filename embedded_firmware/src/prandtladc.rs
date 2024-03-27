@@ -1,13 +1,13 @@
 use crate::hal::prelude::*;
 use atsamd_hal::{
     adc::Adc,
-    gpio::{Alternate, Pin, B, PA04, PA06},
+    gpio::{Alternate, Pin, B, PA06, PA07},
     pac::ADC,
 };
 use embedded_firmware_core::PrandtlAdc;
 
 pub type PumpPin = Pin<PA06, Alternate<B>>;
-pub type FanPin = Pin<PA04, Alternate<B>>;
+pub type FanPin = Pin<PA07, Alternate<B>>;
 
 pub struct PrandtlPumpFanAdc {
     adc: Adc<ADC>,

@@ -31,8 +31,8 @@ impl<const MAX: u16> Display for Rpm<MAX> {
 }
 
 impl<const MAX: u16> Rpm<MAX> {
-    pub fn try_from_norm(norm: u8) -> Result<Self, RpmError> {
-        Self::try_from((norm / 255u8) as u16)
+    pub fn try_from_norm(norm: u16) -> Result<Self, RpmError> {
+        Self::try_from((norm / 255u16) as u16)
     }
 
     /// Convert to a normalized u8 (0 rpm = 0 & MAX rpm = 255)

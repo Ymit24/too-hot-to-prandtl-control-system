@@ -29,9 +29,8 @@ mod prandtladc;
 use prandtladc::*;
 
 static mut BUS_ALLOCATOR: Option<UsbBusAllocator<UsbBus>> = None;
-static mut APPLICATION: Option<
-    Application<'static, UsbBus, Delay, Led, Pwm0, Pwm1, PrandtlPumpFanAdc>,
-> = None;
+static mut APPLICATION: Option<Application<'static, UsbBus, Delay, Led, Pwm0, PrandtlPumpFanAdc>> =
+    None;
 
 fn initialize() {
     let mut peripherals = Peripherals::take().unwrap();
@@ -48,8 +47,8 @@ fn initialize() {
 
     // Setup the fan & pump pwm pins
     // TODO: Extract to function
+    let _pump_ctrl_pwm0_pin = pins.pa04.into_mode::<hal::gpio::AlternateE>(); // pump ctrl pwm1
     let _fan_ctrl_pwm0_pin = pins.pa05.into_mode::<hal::gpio::AlternateE>(); // fan ctrl pwm01
-    let _pump_ctrl_pwm1_pin = pins.pa07.into_mode::<hal::gpio::AlternateE>(); // pump ctrl pwm1
 
     let usb_n = bsp::pin_alias!(pins.usb_n);
     let usb_p = bsp::pin_alias!(pins.usb_p);
@@ -75,21 +74,10 @@ fn initialize() {
         peripherals.TCC0,
         &mut peripherals.PM,
     );
-    let mut fan_pwm = hal::pwm::Pwm1::new(
-        &tcc0_tcc1_clock,
-        1u32.kHz(),
-        peripherals.TCC1,
-        &mut peripherals.PM,
-    );
 
-    // TODO: Confirm channels
-    pump_pwm.enable(Channel::_1);
-    fan_pwm.enable(Channel::_1);
-
-    // TODO: Confirm pin choices
     let mut adc = Adc::adc(peripherals.ADC, &mut peripherals.PM, &mut clocks);
     let mut pump_sense_channel = pins.pa06.into_mode::<gpio::AlternateB>();
-    let mut fan_sense_channel = pins.pa04.into_mode::<gpio::AlternateB>();
+    let mut fan_sense_channel = pins.pa07.into_mode::<gpio::AlternateB>();
 
     let padc = PrandtlPumpFanAdc::new(adc, pump_sense_channel, fan_sense_channel);
 
@@ -100,13 +88,10 @@ fn initialize() {
             delay,
             led,
             pump_pwm,
-            fan_pwm,
-            Channel::_1,
+            Channel::_0,
             Channel::_1,
             padc,
         ));
-
-        let app = APPLICATION.as_mut().unwrap();
     }
 
     // this stays
@@ -117,8 +102,8 @@ fn initialize() {
 }
 
 // TODO: Finish feature parity with RTIC version.
-// [ ] PWM Pump/Fan control
-// [ ] ADC Pump/Fan input
+// [x] PWM Pump/Fan control
+// [x] ADC Pump/Fan input
 // [ ] Valve digital output
 // [ ] Valve digital input (determine valve state)
 
@@ -146,7 +131,14 @@ fn main() -> ! {
             while let Some(packet) = app.incoming_packets.pop() {
                 match packet {
                     Packet::ReportControlTargets(control_packet) => {
-                        app.led.set_state(control_packet.command.into());
+                        let pump_pwm_duty_norm =
+                            (control_packet.pump_control_voltage as f32) / 100.0;
+                        let pump_pwm_duty =
+                            (pump_pwm_duty_norm * (app.pump_pwm.get_max_duty() as f32)) as u32;
+
+                        app.pump_pwm.set_duty(Channel::_0, pump_pwm_duty);
+                        app.pump_pwm.set_duty(Channel::_1, pump_pwm_duty);
+                        //app.led.set_state(control_packet.command.into());
                     }
                     _ => {}
                 }
@@ -154,10 +146,29 @@ fn main() -> ! {
 
             // NOTE: DEBUG CODE
             for i in 0..2 {
+                let pump_speed = app.padc.read_pump_sense_raw();
+                let fan_speed = app.padc.read_fan_sense_raw();
+
+                if let Some(pump_speed) = pump_speed {
+                    let pump_speed_norm = (pump_speed as f32) / (4096f32);
+                    app.led.set_state((pump_speed_norm < 0.5f32).into());
+
+                    if let Some(fan_speed) = fan_speed {
+                        app.outgoing_packets.push(Packet::ReportSensors(
+                            common::packet::ReportSensorsPacket {
+                                pump_speed_norm: pump_speed,
+                                fan_speed_norm: fan_speed,
+                                valve_state: common::packet::ValveState::Open,
+                            },
+                        ));
+                        continue;
+                    }
+                }
+
                 app.outgoing_packets.push(Packet::ReportSensors(
                     common::packet::ReportSensorsPacket {
-                        fan_speed_norm: 100,
-                        pump_speed_norm: 200,
+                        pump_speed_norm: 1,
+                        fan_speed_norm: 1,
                         valve_state: common::packet::ValveState::Open,
                     },
                 ));

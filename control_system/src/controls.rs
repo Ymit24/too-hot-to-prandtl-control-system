@@ -21,7 +21,7 @@ pub fn generate_control_frame(
     tracing::info!("Current led state: {}", state);
     ControlEvent {
         fan_speed: crate::models::rpm::Rpm { value: 1250 },
-        pump_pwm: crate::models::voltage::Voltage { value: 3.4f32 },
+        pump_pwm: crate::models::voltage::Voltage { value: 5f32 },
         valve_state: ValveState::Open,
         debug_command: state,
     }

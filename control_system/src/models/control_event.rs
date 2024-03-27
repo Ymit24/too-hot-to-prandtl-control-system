@@ -32,8 +32,8 @@ impl TryFrom<ControlEvent> for Packet {
 
     fn try_from(value: ControlEvent) -> Result<Self, Self::Error> {
         Ok(Packet::ReportControlTargets(ReportControlTargetsPacket {
-            fan_control_voltage: value.fan_speed.into_norm(),
-            pump_control_voltage: value.pump_pwm.into_norm(),
+            fan_control_voltage: 48000,
+            pump_control_voltage: 50 /*value.pump_pwm.into_norm()*/,
             valve_control_state: value.valve_state.into(),
             command: value.debug_command,
         }))
