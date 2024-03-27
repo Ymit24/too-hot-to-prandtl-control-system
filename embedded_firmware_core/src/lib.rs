@@ -1,8 +1,15 @@
 #![cfg_attr(not(test), no_std)]
 
+use core::{convert::Infallible, marker::PhantomData, u16};
+
 use bare_metal::CriticalSection;
 use common::packet::Packet;
-use embedded_hal::{blocking::delay::DelayMs, digital::v2::OutputPin, Pwm};
+use embedded_hal::{
+    blocking::delay::DelayMs,
+    can::nb,
+    digital::v2::{InputPin, OutputPin},
+    Pwm,
+};
 use heapless::Vec;
 use usb_device::{
     bus::UsbBus,
@@ -11,7 +18,29 @@ use usb_device::{
 };
 use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
-pub struct Application<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin, P1: Pwm, P2: Pwm, A> {
+pub fn read_from_adc<T, CH: Channel<T, ID = u8>, ADC: OneShot<T, u16, CH>>(
+    mut adc: ADC,
+    ch: &mut CH,
+) -> u16 {
+    let r = adc.read(ch);
+    if let Ok(r) = r {
+        return r;
+    }
+    1
+}
+
+pub struct Application<
+    'a,
+    B: UsbBus,
+    D: DelayMs<u16>,
+    L: OutputPin,
+    P1: Pwm,
+    P2: Pwm,
+    AdcInt,
+    AdcChannel: Channel<AdcInt, ID = u8>,
+    ADC: OneShot<AdcInt, u16, AdcChannel>,
+> {
+    _phantom: PhantomData<AdcInt>,
     pub serial_port: SerialPort<'a, B>,
     pub usb_device: UsbDevice<'a, B>,
 
@@ -21,7 +50,8 @@ pub struct Application<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin, P1: Pwm, P2
     pub pump_pwm: P1,
     pub fan_pwm: P2,
 
-    pub adc: A,
+    pub adc: ADC,
+    pub pump_sense_channel: AdcChannel,
 
     // NOTE: FOR DEBUG SHOULD BE PRIVATE
     /// Represents a queue of packets which have been received.
@@ -34,6 +64,8 @@ pub struct Application<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin, P1: Pwm, P2
 
 use embedded_hal::prelude::*;
 
+use embedded_hal::adc::{Channel, OneShot};
+
 impl<
         'a,
         B: UsbBus,
@@ -41,8 +73,10 @@ impl<
         L: OutputPin,
         P1: Pwm<Channel = impl Clone, Duty = u32>,
         P2: Pwm<Channel = impl Clone, Duty = u32>,
-        A,
-    > Application<'a, B, D, L, P1, P2, A>
+        AdcInt,
+        AdcChannel: Channel<AdcInt, ID = u8>,
+        ADC: OneShot<AdcInt, u16, AdcChannel>,
+    > Application<'a, B, D, L, P1, P2, AdcInt, AdcChannel, ADC>
 {
     pub fn new(
         bus_allocator: &'a UsbBusAllocator<B>,
@@ -52,7 +86,8 @@ impl<
         mut fan_pwm: P2,
         pump_channel: P1::Channel,
         fan_channel: P2::Channel,
-        adc: A,
+        adc: ADC,
+        pump_sense_channel: AdcChannel,
     ) -> Self {
         pump_pwm.enable(pump_channel.clone());
         fan_pwm.enable(fan_channel.clone());
@@ -61,6 +96,7 @@ impl<
         fan_pwm.set_duty(fan_channel, fan_pwm.get_max_duty() / 2);
 
         Self {
+            _phantom: PhantomData,
             serial_port: SerialPort::new(&bus_allocator),
             usb_device: UsbDeviceBuilder::new(bus_allocator, UsbVidPid(0x2222, 0x3333))
                 .manufacturer("LA Tech")
@@ -73,9 +109,17 @@ impl<
             pump_pwm,
             fan_pwm,
             adc,
+            pump_sense_channel,
             incoming_packets: Vec::new(),
             outgoing_packets: Vec::new(),
         }
+    }
+
+    pub fn read_adc(&mut self) -> Option<u16> {
+        if let Ok(value) = self.adc.read(&mut self.pump_sense_channel) {
+            return Some(value);
+        }
+        return None;
     }
 
     /// Poll the USB Device. This should be called from the USB interrupt.

@@ -6,7 +6,7 @@ use bsp::hal;
 use bsp::pins::Led;
 use common::packet::Packet;
 use cortex_m::peripheral::NVIC;
-use embedded_firmware_core::Application;
+use embedded_firmware_core::{read_from_adc, Application};
 use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::digital::v2::OutputPin;
 use hal::adc::Adc;
@@ -24,8 +24,9 @@ use hal::{gpio, prelude::*};
 use usb_device::bus::UsbBusAllocator;
 
 static mut BUS_ALLOCATOR: Option<UsbBusAllocator<UsbBus>> = None;
-static mut APPLICATION: Option<Application<'static, UsbBus, Delay, Led, Pwm0, Pwm1, Adc<ADC>>> =
-    None;
+static mut APPLICATION: Option<
+    Application<'static, UsbBus, Delay, Led, Pwm0, Pwm1, ADC, Pin<PA06, Alternate<B>>, Adc<ADC>>,
+> = None;
 
 fn initialize() {
     let mut peripherals = Peripherals::take().unwrap();
@@ -80,7 +81,9 @@ fn initialize() {
     fan_pwm.enable(Channel::_1);
 
     let mut adc = Adc::adc(peripherals.ADC, &mut peripherals.PM, &mut clocks);
-    let mut a0 = pins.pa06.into_mode::<gpio::AlternateB>();
+    let mut pump_sense_channel = pins.pa06.into_mode::<gpio::AlternateB>();
+
+    // let r = read_from_adc(adc, &mut a0);
 
     // NOTE: This must happen before we enable USB interrupt.
     unsafe {
@@ -93,6 +96,7 @@ fn initialize() {
             Channel::_1,
             Channel::_1,
             adc,
+            pump_sense_channel,
         ));
     }
 
