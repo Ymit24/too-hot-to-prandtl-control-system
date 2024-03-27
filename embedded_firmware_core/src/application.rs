@@ -16,19 +16,21 @@ pub struct Application<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin, P1: Pwm, PA
     pub usb_device: UsbDevice<'a, B>,
 
     pub delay: D,
-    pub led: L,
+    led: L,
 
-    pub pump_pwm: P1,
+    pwm: P1,
+    pump_pwm_channel: P1::Channel,
+    fan_pwm_channel: P1::Channel,
 
-    pub padc: PAdc,
+    padc: PAdc,
 
-    // NOTE: FOR DEBUG SHOULD BE PRIVATE
+    sensor_poll_timer: u8,
+
     /// Represents a queue of packets which have been received.
-    pub incoming_packets: Vec<Packet, 16>,
+    incoming_packets: Vec<Packet, 16>,
 
-    // NOTE: FOR DEBUG SHOULD BE PRIVATE
     /// Represents a queue of packets which need to be sent.
-    pub outgoing_packets: Vec<Packet, 16>,
+    outgoing_packets: Vec<Packet, 16>,
 }
 
 impl<
@@ -52,8 +54,19 @@ impl<
         pump_pwm.enable(pump_channel.clone());
         pump_pwm.enable(fan_channel.clone());
 
-        pump_pwm.set_duty(pump_channel, pump_pwm.get_max_duty() * 0);
-        pump_pwm.set_duty(fan_channel, pump_pwm.get_max_duty() * 0);
+        // Initialize pump and fan to 50%.
+        // This should prevent overheating while device boots.
+        pump_pwm.set_duty(
+            pump_channel.clone(),
+            ((pump_pwm.get_max_duty() as f32) * 0.5f32) as u32,
+        );
+        pump_pwm.set_duty(
+            fan_channel.clone(),
+            ((pump_pwm.get_max_duty() as f32) * 0.5f32) as u32,
+        );
+
+        // TODO: Set valve to PUMP-IN-LOOP
+        // TODO: Make sure pump doesn't come on before valve is open.
 
         Self {
             serial_port: SerialPort::new(&bus_allocator),
@@ -65,8 +78,11 @@ impl<
                 .build(),
             delay,
             led: led_pin,
-            pump_pwm,
+            pwm: pump_pwm,
+            pump_pwm_channel: pump_channel,
+            fan_pwm_channel: fan_channel,
             padc,
+            sensor_poll_timer: 0,
             incoming_packets: Vec::new(),
             outgoing_packets: Vec::new(),
         }
@@ -75,6 +91,65 @@ impl<
     /// Poll the USB Device. This should be called from the USB interrupt.
     pub fn poll_usb(&mut self) {
         self.usb_device.poll(&mut [&mut self.serial_port]);
+    }
+
+    /// The core application loop.
+    /// TODO: TEST
+    pub fn core_loop(&mut self) {
+        self.process_incoming_packets();
+
+        // NOTE: Approximately 0.5Hz.
+        //       Consider using hardware timer to schedule reporting sensor data
+        self.sensor_poll_timer += 1;
+        if self.sensor_poll_timer > 5 {
+            self.sensor_poll_timer -= 5;
+
+            self.report_sensors();
+        }
+    }
+
+    /// Create and push report sensor packet to outgoing packets queue.
+    /// NOTE: Consider handling errors
+    /// TODO: TEST
+    pub fn report_sensors(&mut self) {
+        let pump_speed = self.padc.read_pump_sense_raw();
+        let fan_speed = self.padc.read_fan_sense_raw();
+
+        if let Some(pump_speed) = pump_speed {
+            if let Some(fan_speed) = fan_speed {
+                let _ = self.outgoing_packets.push(Packet::ReportSensors(
+                    common::packet::ReportSensorsPacket {
+                        pump_speed_norm: pump_speed,
+                        fan_speed_norm: fan_speed,
+                        valve_state: common::packet::ValveState::Open,
+                    },
+                ));
+            }
+        }
+    }
+
+    /// Clear the incoming packet queue and process each packet.
+    /// Control packets will trigger changes to the hardware state.
+    /// TODO: TEST
+    pub fn process_incoming_packets(&mut self) {
+        while let Some(packet) = self.incoming_packets.pop() {
+            match packet {
+                Packet::ReportControlTargets(control_packet) => {
+                    let pump_pwm_duty_norm = (control_packet.pump_control_voltage as f32) / 100.0;
+                    let pump_pwm_duty =
+                        (pump_pwm_duty_norm * (self.pwm.get_max_duty() as f32)) as u32;
+
+                    self.pwm
+                        .set_duty(self.pump_pwm_channel.clone(), pump_pwm_duty);
+                    self.pwm
+                        .set_duty(self.fan_pwm_channel.clone(), pump_pwm_duty);
+
+                    // TODO: Remove debug indicator
+                    let _ = self.led.set_state(control_packet.command.into());
+                }
+                _ => {}
+            }
+        }
     }
 
     /// This function will read as many packets from USB as ready.

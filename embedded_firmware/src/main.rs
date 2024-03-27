@@ -75,6 +75,7 @@ fn initialize() {
         &mut peripherals.PM,
     );
 
+    // NOTE: This is a 3v3 ADC. 0V -> 0 3.3V -> 4096
     let mut adc = Adc::adc(peripherals.ADC, &mut peripherals.PM, &mut clocks);
     let mut pump_sense_channel = pins.pa06.into_mode::<gpio::AlternateB>();
     let mut fan_sense_channel = pins.pa07.into_mode::<gpio::AlternateB>();
@@ -101,12 +102,6 @@ fn initialize() {
     }
 }
 
-// TODO: Finish feature parity with RTIC version.
-// [x] PWM Pump/Fan control
-// [x] ADC Pump/Fan input
-// [ ] Valve digital output
-// [ ] Valve digital input (determine valve state)
-
 #[entry]
 fn main() -> ! {
     initialize();
@@ -122,58 +117,7 @@ fn main() -> ! {
             app.write_packets_to_usb(cs);
         });
 
-        // NOTE: DEBUG CODE
-        counter += 1;
-        if counter >= 4 {
-            counter -= 4;
-
-            // NOTE: DEBUG CODE
-            while let Some(packet) = app.incoming_packets.pop() {
-                match packet {
-                    Packet::ReportControlTargets(control_packet) => {
-                        let pump_pwm_duty_norm =
-                            (control_packet.pump_control_voltage as f32) / 100.0;
-                        let pump_pwm_duty =
-                            (pump_pwm_duty_norm * (app.pump_pwm.get_max_duty() as f32)) as u32;
-
-                        app.pump_pwm.set_duty(Channel::_0, pump_pwm_duty);
-                        app.pump_pwm.set_duty(Channel::_1, pump_pwm_duty);
-                        //app.led.set_state(control_packet.command.into());
-                    }
-                    _ => {}
-                }
-            }
-
-            // NOTE: DEBUG CODE
-            for i in 0..2 {
-                let pump_speed = app.padc.read_pump_sense_raw();
-                let fan_speed = app.padc.read_fan_sense_raw();
-
-                if let Some(pump_speed) = pump_speed {
-                    let pump_speed_norm = (pump_speed as f32) / (4096f32);
-                    app.led.set_state((pump_speed_norm < 0.5f32).into());
-
-                    if let Some(fan_speed) = fan_speed {
-                        app.outgoing_packets.push(Packet::ReportSensors(
-                            common::packet::ReportSensorsPacket {
-                                pump_speed_norm: pump_speed,
-                                fan_speed_norm: fan_speed,
-                                valve_state: common::packet::ValveState::Open,
-                            },
-                        ));
-                        continue;
-                    }
-                }
-
-                app.outgoing_packets.push(Packet::ReportSensors(
-                    common::packet::ReportSensorsPacket {
-                        pump_speed_norm: 1,
-                        fan_speed_norm: 1,
-                        valve_state: common::packet::ValveState::Open,
-                    },
-                ));
-            }
-        }
+        app.core_loop();
 
         app.delay.delay_ms(100u16);
     }
