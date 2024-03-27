@@ -6,7 +6,8 @@ use bsp::hal;
 use bsp::pins::Led;
 use common::packet::Packet;
 use cortex_m::peripheral::NVIC;
-use embedded_firmware_core::{Application, PrandtlAdc};
+use embedded_firmware_core::application::Application;
+use embedded_firmware_core::PrandtlAdc;
 use embedded_hal::adc::Channel as AdcChannel;
 use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::digital::v2::OutputPin;
@@ -24,45 +25,13 @@ use hal::{gpio, prelude::*};
 
 use usb_device::bus::UsbBusAllocator;
 
+mod prandtladc;
+use prandtladc::*;
+
 static mut BUS_ALLOCATOR: Option<UsbBusAllocator<UsbBus>> = None;
 static mut APPLICATION: Option<
     Application<'static, UsbBus, Delay, Led, Pwm0, Pwm1, PrandtlPumpFanAdc>,
 > = None;
-
-type PumpPin = Pin<PA06, Alternate<B>>;
-type FanPin = Pin<PA04, Alternate<B>>;
-
-struct PrandtlPumpFanAdc {
-    adc: Adc<ADC>,
-    pump_sense_channel: PumpPin,
-    fan_sense_channel: FanPin,
-}
-
-impl PrandtlPumpFanAdc {
-    pub fn new(adc: Adc<ADC>, ch1: PumpPin, ch2: FanPin) -> Self {
-        Self {
-            adc,
-            pump_sense_channel: ch1,
-            fan_sense_channel: ch2,
-        }
-    }
-}
-
-impl PrandtlAdc for PrandtlPumpFanAdc {
-    fn read_pump_sense_raw(&mut self) -> Option<u16> {
-        if let Ok(value) = self.adc.read(&mut self.pump_sense_channel) {
-            return Some(value);
-        }
-        None
-    }
-
-    fn read_fan_sense_raw(&mut self) -> Option<u16> {
-        if let Ok(value) = self.adc.read(&mut self.fan_sense_channel) {
-            return Some(value);
-        }
-        None
-    }
-}
 
 fn initialize() {
     let mut peripherals = Peripherals::take().unwrap();
@@ -121,8 +90,6 @@ fn initialize() {
     let mut adc = Adc::adc(peripherals.ADC, &mut peripherals.PM, &mut clocks);
     let mut pump_sense_channel = pins.pa06.into_mode::<gpio::AlternateB>();
     let mut fan_sense_channel = pins.pa04.into_mode::<gpio::AlternateB>();
-
-    let r: u16 = adc.read(&mut pump_sense_channel).unwrap();
 
     let padc = PrandtlPumpFanAdc::new(adc, pump_sense_channel, fan_sense_channel);
 
