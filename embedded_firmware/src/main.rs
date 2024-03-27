@@ -6,11 +6,12 @@ use bsp::hal;
 use bsp::pins::Led;
 use common::packet::Packet;
 use cortex_m::peripheral::NVIC;
-use embedded_firmware_core::{read_from_adc, Application};
+use embedded_firmware_core::{Application, PrandtlAdc};
+use embedded_hal::adc::Channel as AdcChannel;
 use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::digital::v2::OutputPin;
 use hal::adc::Adc;
-use hal::gpio::{Alternate, Pin, B, PA06};
+use hal::gpio::{Alternate, Pin, B, PA04, PA05, PA06, PA07};
 use hal::pwm::{Channel, Pwm0, Pwm1};
 use panic_halt as _;
 
@@ -25,8 +26,43 @@ use usb_device::bus::UsbBusAllocator;
 
 static mut BUS_ALLOCATOR: Option<UsbBusAllocator<UsbBus>> = None;
 static mut APPLICATION: Option<
-    Application<'static, UsbBus, Delay, Led, Pwm0, Pwm1, ADC, Pin<PA06, Alternate<B>>, Adc<ADC>>,
+    Application<'static, UsbBus, Delay, Led, Pwm0, Pwm1, PrandtlPumpFanAdc>,
 > = None;
+
+type PumpPin = Pin<PA06, Alternate<B>>;
+type FanPin = Pin<PA04, Alternate<B>>;
+
+struct PrandtlPumpFanAdc {
+    adc: Adc<ADC>,
+    pump_sense_channel: PumpPin,
+    fan_sense_channel: FanPin,
+}
+
+impl PrandtlPumpFanAdc {
+    pub fn new(adc: Adc<ADC>, ch1: PumpPin, ch2: FanPin) -> Self {
+        Self {
+            adc,
+            pump_sense_channel: ch1,
+            fan_sense_channel: ch2,
+        }
+    }
+}
+
+impl PrandtlAdc for PrandtlPumpFanAdc {
+    fn read_pump_sense_raw(&mut self) -> Option<u16> {
+        if let Ok(value) = self.adc.read(&mut self.pump_sense_channel) {
+            return Some(value);
+        }
+        None
+    }
+
+    fn read_fan_sense_raw(&mut self) -> Option<u16> {
+        if let Ok(value) = self.adc.read(&mut self.fan_sense_channel) {
+            return Some(value);
+        }
+        None
+    }
+}
 
 fn initialize() {
     let mut peripherals = Peripherals::take().unwrap();
@@ -77,13 +113,18 @@ fn initialize() {
         &mut peripherals.PM,
     );
 
+    // TODO: Confirm channels
     pump_pwm.enable(Channel::_1);
     fan_pwm.enable(Channel::_1);
 
+    // TODO: Confirm pin choices
     let mut adc = Adc::adc(peripherals.ADC, &mut peripherals.PM, &mut clocks);
     let mut pump_sense_channel = pins.pa06.into_mode::<gpio::AlternateB>();
+    let mut fan_sense_channel = pins.pa04.into_mode::<gpio::AlternateB>();
 
-    // let r = read_from_adc(adc, &mut a0);
+    let r: u16 = adc.read(&mut pump_sense_channel).unwrap();
+
+    let padc = PrandtlPumpFanAdc::new(adc, pump_sense_channel, fan_sense_channel);
 
     // NOTE: This must happen before we enable USB interrupt.
     unsafe {
@@ -95,9 +136,10 @@ fn initialize() {
             fan_pwm,
             Channel::_1,
             Channel::_1,
-            adc,
-            pump_sense_channel,
+            padc,
         ));
+
+        let app = APPLICATION.as_mut().unwrap();
     }
 
     // this stays
