@@ -1,8 +1,5 @@
-use std::collections::HashMap;
-use std::fmt::Display;
-use std::hash::Hash;
 use std::marker::PhantomData;
-use std::ops::{Add, Deref, Div, Mul, Sub};
+use std::ops::{Add, Div, Mul, Sub};
 use thiserror::Error;
 
 /// This represents a curve mapping some `X` type to some `Y` type.
@@ -10,8 +7,8 @@ use thiserror::Error;
 /// This supports unit based curves. (e.g. RPM vs degC)
 ///
 /// Curves can't be empty.
-pub struct Curve<X: PartialOrd + Ord + Hash + Clone, Y: Clone> {
-    points: HashMap<X, Y>,
+pub struct Curve<X: PartialOrd + Clone, Y: Clone> {
+    points: Vec<(X, Y)>,
     _marker: PhantomData<()>,
 }
 
@@ -21,24 +18,26 @@ pub enum CurveError {
     Empty,
 }
 
+/// This trait makes sure that a type can be scaled by a f32.
 pub trait LinearInterp {
-    fn norm_scale(self, x: f32) -> Self;
+    /// Scale the underlying value by `x`.
+    /// e.g. `10f32.scale(0.5f32) == 5f32`
+    /// or `100RPM.scale(0.1f32) == 10RPM`
+    fn scale(self, x: f32) -> Self;
 }
 
 impl<
-        X: PartialOrd
-            + Ord
-            + Hash
+        X: PartialOrd + Clone + Copy + Add<Output = X> + Sub<Output = X> + Div<Output = X> + Into<f32>,
+        Y: Copy
             + Clone
-            + Copy
-            + Add<Output = X>
-            + Sub<Output = X>
-            + Div<Output = X>
-            + Into<f32>,
-        Y: Copy + Clone + Sub<Output = Y> + Add<Output = Y> + Mul<Output = Y> + LinearInterp + PartialEq,
+            + Sub<Output = Y>
+            + Add<Output = Y>
+            + Mul<Output = Y>
+            + LinearInterp
+            + PartialEq,
     > Curve<X, Y>
 {
-    pub fn new(points: HashMap<X, Y>) -> Result<Self, CurveError> {
+    pub fn new(points: Vec<(X, Y)>) -> Result<Self, CurveError> {
         if points.len() == 0 {
             return Err(CurveError::Empty);
         }
@@ -52,66 +51,54 @@ impl<
     /// This will clamp to the lowest value if `x` is lower than the lowest control point.
     /// This will clamp to the highest value if `x` is higher than the highest control point.
     pub fn lookup(&self, x: X) -> Y {
-        let last_point_below_x = self.find_last_point_before_x(x.clone()).unwrap();
-        let first_point_after_x = self.find_first_point_after_x(x.clone()).unwrap();
+        let xy1 = self.find_last_point_before_x(x.clone()).unwrap();
+        let xy2 = self.find_first_point_after_x(x.clone()).unwrap();
 
-        let last_point_below_x_y = self.points.get(&last_point_below_x).unwrap().clone();
-        let first_point_after_x_y = self.points.get(&first_point_after_x).unwrap().clone();
-
-        if last_point_below_x_y == first_point_after_x_y {
-            return last_point_below_x_y;
+        if xy1.0 == xy2.0 {
+            return xy1.1;
         }
 
-        last_point_below_x_y
-            + (first_point_after_x_y - last_point_below_x_y).norm_scale(
-                ((x - last_point_below_x) / (first_point_after_x - last_point_below_x)).into(),
-            )
+        xy1.1 + (xy2.1 - xy1.1).scale(((x - xy1.0) / (xy2.0 - xy1.0)).into())
     }
 
     /// Find the last point before `x` or the earliest point.
     /// E.g. for the curve containing [(0,0), (10,1)]:
-    ///     find_last_point_before_x(-3) -> 0
-    ///     find_last_point_before_x(3) -> 0
-    ///     find_last_point_before_x(12) -> 10
-    fn find_last_point_before_x(&self, x: X) -> Option<X> {
+    ///     find_last_point_before_x(-3) -> (0,0)
+    ///     find_last_point_before_x(3) -> (0,0)
+    ///     find_last_point_before_x(12) -> (10,1)
+    fn find_last_point_before_x(&self, x: X) -> Option<(X, Y)> {
         let mut point_xs = self
             .points
-            .keys()
+            .clone()
             .into_iter()
-            .map(Clone::clone)
+            .filter(|xi| xi.0 <= x)
             .collect::<Vec<_>>();
-        point_xs.sort();
-        point_xs
+        point_xs.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap());
+        point_xs.into_iter().last().or(self
+            .points
+            .clone()
             .into_iter()
-            .filter(|xi| *xi <= x) // 0 3
-            .collect::<Vec<_>>()
-            .into_iter()
-            .last() // 3
-            .or(self.points.keys().into_iter().min().map(Clone::clone))
-            .map(|x| x.clone())
+            .min_by(|x, y| x.0.partial_cmp(&y.0).unwrap()))
     }
 
     /// Find the first point after `x` or the latest point.
     /// E.g. for the curve containing [(0,0), (10,1)]:
-    ///     find_first_point_after_x(-3) -> 0
-    ///     find_first_point_after_x(3) -> 10
-    ///     find_first_point_after_x(12) -> 10
-    fn find_first_point_after_x(&self, x: X) -> Option<X> {
+    ///     find_first_point_after_x(-3) -> (0,0)
+    ///     find_first_point_after_x(3) -> (10,1)
+    ///     find_first_point_after_x(12) -> (10,1)
+    fn find_first_point_after_x(&self, x: X) -> Option<(X, Y)> {
         let mut point_xs = self
             .points
-            .keys()
+            .clone()
             .into_iter()
-            .map(Clone::clone)
+            .filter(|xi| x <= xi.0)
             .collect::<Vec<_>>();
-        point_xs.sort();
-        point_xs
+        point_xs.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap());
+        point_xs.into_iter().rev().last().or(self
+            .points
+            .clone()
             .into_iter()
-            .filter(|xi| x <= *xi)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .last()
-            .or(self.points.keys().into_iter().max().map(Clone::clone))
+            .max_by(|x, y| x.0.partial_cmp(&y.0).unwrap()))
     }
 }
 
@@ -120,55 +107,132 @@ mod tests {
     use super::*;
 
     impl LinearInterp for f32 {
-        fn norm_scale(self, x: f32) -> Self {
+        fn scale(self, x: f32) -> Self {
             self * x
         }
     }
 
-    impl LinearInterp for i32 {
-        fn norm_scale(self, x: f32) -> Self {
-            ((self as f32) * x).floor() as i32
-        }
+    #[test]
+    fn test_cant_construct_empty_curve() {
+        let curve: Result<Curve<f32, f32>, CurveError> = Curve::new(vec![]);
+        assert!(curve.is_err());
     }
 
     #[test]
     fn test_find_last_point_before_x() {
-        let points = HashMap::from([(0i16, 0f32), (3, 3f32), (10, 10f32)]);
+        let points = vec![(0i16, 0f32), (3, 3f32), (10, 10f32)];
         let curve = Curve::new(points).unwrap();
 
-        assert_eq!(curve.find_last_point_before_x(-3), Some(0));
-        assert_eq!(curve.find_last_point_before_x(0), Some(0));
-        assert_eq!(curve.find_last_point_before_x(1), Some(0));
-        assert_eq!(curve.find_last_point_before_x(3), Some(3));
-        assert_eq!(curve.find_last_point_before_x(4), Some(3));
-        assert_eq!(curve.find_last_point_before_x(10), Some(10));
-        assert_eq!(curve.find_last_point_before_x(100), Some(10));
+        assert_eq!(curve.find_last_point_before_x(-3), Some((0i16, 0f32)));
+        assert_eq!(curve.find_last_point_before_x(0), Some((0i16, 0f32)));
+        assert_eq!(curve.find_last_point_before_x(1), Some((0i16, 0f32)));
+        assert_eq!(curve.find_last_point_before_x(3), Some((3i16, 3f32)));
+        assert_eq!(curve.find_last_point_before_x(4), Some((3i16, 3f32)));
+        assert_eq!(curve.find_last_point_before_x(10), Some((10i16, 10f32)));
+        assert_eq!(curve.find_last_point_before_x(100), Some((10i16, 10f32)));
     }
 
     #[test]
     fn test_find_first_point_after_x() {
-        let points = HashMap::from([(0i16, 0), (3, 3), (10, 10)]);
+        let points = vec![(0i16, 0f32), (3, 3f32), (10, 10f32)];
         let curve = Curve::new(points).unwrap();
 
-        assert_eq!(curve.find_first_point_after_x(-3), Some(0));
-        assert_eq!(curve.find_first_point_after_x(0), Some(0));
-        assert_eq!(curve.find_first_point_after_x(1), Some(3));
-        assert_eq!(curve.find_first_point_after_x(3), Some(3));
-        assert_eq!(curve.find_first_point_after_x(4), Some(10));
-        assert_eq!(curve.find_first_point_after_x(10), Some(10));
-        assert_eq!(curve.find_first_point_after_x(100), Some(10));
+        assert_eq!(curve.find_first_point_after_x(-3), Some((0i16, 0f32)));
+        assert_eq!(curve.find_first_point_after_x(0), Some((0i16, 0f32)));
+        assert_eq!(curve.find_first_point_after_x(1), Some((3i16, 3f32)));
+        assert_eq!(curve.find_first_point_after_x(3), Some((3i16, 3f32)));
+        assert_eq!(curve.find_first_point_after_x(4), Some((10i16, 10f32)));
+        assert_eq!(curve.find_first_point_after_x(10), Some((10i16, 10f32)));
+        assert_eq!(curve.find_first_point_after_x(100), Some((10i16, 10f32)));
     }
 
     #[test]
     fn test_lookup() {
-        let points = HashMap::from([(0i16, 0f32), (3, 3f32), (10, 10f32)]);
+        let points = vec![(0f32, 0f32), (3f32, 3f32), (10f32, 10f32)];
         let curve = Curve::new(points).unwrap();
 
-        assert_eq!(curve.lookup(-3i16), 0f32);
-        assert_eq!(curve.lookup(0i16), 0f32);
-        assert_eq!(curve.lookup(1i16), 1f32);
-        assert_eq!(curve.lookup(3i16), 3f32);
-        assert_eq!(curve.lookup(10i16), 10f32);
-        assert_eq!(curve.lookup(100i16), 10f32);
+        assert_eq!(curve.lookup(-3f32), 0f32);
+        assert_eq!(curve.lookup(0f32), 0f32);
+        assert_eq!(curve.lookup(1f32), 1f32);
+        assert_eq!(curve.lookup(3f32), 3f32);
+        assert_eq!(curve.lookup(10f32), 10f32);
+        assert_eq!(curve.lookup(100f32), 10f32);
+    }
+
+    #[derive(Copy, Clone, PartialEq, PartialOrd)]
+    struct TempC {
+        value: f32,
+    }
+
+    impl Sub for TempC {
+        type Output = Self;
+
+        fn sub(self, rhs: Self) -> Self::Output {
+            Self {
+                value: self.value - rhs.value,
+            }
+        }
+    }
+
+    impl Add for TempC {
+        type Output = Self;
+
+        fn add(self, rhs: Self) -> Self::Output {
+            Self {
+                value: self.value + rhs.value,
+            }
+        }
+    }
+
+    impl Div for TempC {
+        type Output = Self;
+
+        fn div(self, rhs: Self) -> Self::Output {
+            Self {
+                value: self.value / rhs.value,
+            }
+        }
+    }
+
+    impl LinearInterp for TempC {
+        fn scale(self, x: f32) -> Self {
+            Self {
+                value: self.value * x,
+            }
+        }
+    }
+
+    impl Into<f32> for TempC {
+        fn into(self) -> f32 {
+            self.value
+        }
+    }
+
+    impl From<f32> for TempC {
+        fn from(value: f32) -> Self {
+            Self { value }
+        }
+    }
+
+    #[test]
+    fn test_with_physical_unit() {
+        let points: Vec<(TempC, f32)> = vec![
+            (0f32, 10f32),
+            (30f32, 10f32),
+            (60f32, 50f32),
+            (80f32, 100f32),
+        ]
+        .into_iter()
+        .map(|x| (x.0.into(), x.1))
+        .collect();
+
+        let curve = Curve::new(points).unwrap();
+
+        assert_eq!(curve.lookup(0f32.into()), 10f32);
+        assert_eq!(curve.lookup(30f32.into()), 10f32);
+        assert_eq!(curve.lookup(45f32.into()), 30f32);
+        assert_eq!(curve.lookup(60f32.into()), 50f32);
+        assert_eq!(curve.lookup(70f32.into()), 75f32);
+        assert_eq!(curve.lookup(80f32.into()), 100f32);
     }
 }
