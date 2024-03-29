@@ -9,3 +9,4 @@ edition = "2021"
 serde = {version="1.0.196", default-features=false }
 postcard = "1.0.8"
 fixedstr = { version= "0.5.5", features=["no-alloc", "serde"]}
+thiserror-no-std = "2.0.2"
