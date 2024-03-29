@@ -1,5 +1,4 @@
 use std::marker::PhantomData;
-use std::ops::{Add, Div, Mul, Sub};
 use thiserror::Error;
 
 /// This represents a curve mapping some `X` type to some `Y` type.
@@ -7,7 +6,8 @@ use thiserror::Error;
 /// This supports unit based curves. (e.g. RPM vs degC)
 ///
 /// Curves can't be empty.
-pub struct Curve<X: PartialOrd + Clone, Y: Clone> {
+pub struct Curve<X: Into<f32>, Y: Into<f32>> {
+    /// Control points for interpolation.
     points: Vec<(X, Y)>,
     _marker: PhantomData<()>,
 }
@@ -18,25 +18,9 @@ pub enum CurveError {
     Empty,
 }
 
-/// This trait makes sure that a type can be scaled by a f32.
-pub trait LinearInterp {
-    /// Scale the underlying value by `x`.
-    /// e.g. `10f32.scale(0.5f32) == 5f32`
-    /// or `100RPM.scale(0.1f32) == 10RPM`
-    fn scale(self, x: f32) -> Self;
-}
-
-impl<
-        X: PartialOrd + Clone + Copy + Add<Output = X> + Sub<Output = X> + Div<Output = X> + Into<f32>,
-        Y: Copy
-            + Clone
-            + Sub<Output = Y>
-            + Add<Output = Y>
-            + Mul<Output = Y>
-            + LinearInterp
-            + PartialEq,
-    > Curve<X, Y>
-{
+impl<X: Clone + Copy + Into<f32>, Y: Clone + Copy + Into<f32> + From<f32>> Curve<X, Y> {
+    /// Create a new curve from a set of control points.
+    /// This curve must not be empty.
     pub fn new(points: Vec<(X, Y)>) -> Result<Self, CurveError> {
         if points.len() == 0 {
             return Err(CurveError::Empty);
@@ -54,11 +38,18 @@ impl<
         let xy1 = self.find_last_point_before_x(x.clone()).unwrap();
         let xy2 = self.find_first_point_after_x(x.clone()).unwrap();
 
-        if xy1.0 == xy2.0 {
-            return xy1.1;
+        let x1: f32 = xy1.0.into();
+        let x2: f32 = xy2.0.into();
+
+        let y1: f32 = xy1.1.into();
+        let y2: f32 = xy2.1.into();
+
+        if x1 == x2 {
+            return y1.into();
         }
 
-        xy1.1 + (xy2.1 - xy1.1).scale(((x - xy1.0) / (xy2.0 - xy1.0)).into())
+        (y1 + (y2 - y1) * ((x.into() - x1) / (x2 - x1))).into()
+        // xy1.1 + (xy2.1 - xy1.1).scale(((x - xy1.0) / (xy2.0 - xy1.0)).into())
     }
 
     /// Find the last point before `x` or the earliest point.
@@ -71,14 +62,14 @@ impl<
             .points
             .clone()
             .into_iter()
-            .filter(|xi| xi.0 <= x)
+            .filter(|xi| xi.0.into() <= x.into())
             .collect::<Vec<_>>();
-        point_xs.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap());
+        point_xs.sort_by(|x, y| x.0.into().partial_cmp(&y.0.into()).unwrap());
         point_xs.into_iter().last().or(self
             .points
             .clone()
             .into_iter()
-            .min_by(|x, y| x.0.partial_cmp(&y.0).unwrap()))
+            .min_by(|x, y| x.0.into().partial_cmp(&y.0.into()).unwrap()))
     }
 
     /// Find the first point after `x` or the latest point.
@@ -91,26 +82,20 @@ impl<
             .points
             .clone()
             .into_iter()
-            .filter(|xi| x <= xi.0)
+            .filter(|xi| x.into() <= xi.0.into())
             .collect::<Vec<_>>();
-        point_xs.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap());
+        point_xs.sort_by(|x, y| x.0.into().partial_cmp(&y.0.into()).unwrap());
         point_xs.into_iter().rev().last().or(self
             .points
             .clone()
             .into_iter()
-            .max_by(|x, y| x.0.partial_cmp(&y.0).unwrap()))
+            .max_by(|x, y| x.0.into().partial_cmp(&y.0.into()).unwrap()))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    impl LinearInterp for f32 {
-        fn scale(self, x: f32) -> Self {
-            self * x
-        }
-    }
 
     #[test]
     fn test_cant_construct_empty_curve() {
@@ -162,44 +147,6 @@ mod tests {
     #[derive(Copy, Clone, PartialEq, PartialOrd)]
     struct TempC {
         value: f32,
-    }
-
-    impl Sub for TempC {
-        type Output = Self;
-
-        fn sub(self, rhs: Self) -> Self::Output {
-            Self {
-                value: self.value - rhs.value,
-            }
-        }
-    }
-
-    impl Add for TempC {
-        type Output = Self;
-
-        fn add(self, rhs: Self) -> Self::Output {
-            Self {
-                value: self.value + rhs.value,
-            }
-        }
-    }
-
-    impl Div for TempC {
-        type Output = Self;
-
-        fn div(self, rhs: Self) -> Self::Output {
-            Self {
-                value: self.value / rhs.value,
-            }
-        }
-    }
-
-    impl LinearInterp for TempC {
-        fn scale(self, x: f32) -> Self {
-            Self {
-                value: self.value * x,
-            }
-        }
     }
 
     impl Into<f32> for TempC {
