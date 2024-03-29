@@ -49,7 +49,6 @@ impl<X: Clone + Copy + Into<f32>, Y: Clone + Copy + Into<f32> + From<f32>> Curve
         }
 
         (y1 + (y2 - y1) * ((x.into() - x1) / (x2 - x1))).into()
-        // xy1.1 + (xy2.1 - xy1.1).scale(((x - xy1.0) / (xy2.0 - xy1.0)).into())
     }
 
     /// Find the last point before `x` or the earliest point.
