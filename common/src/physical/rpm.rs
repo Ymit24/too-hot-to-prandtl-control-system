@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use thiserror_no_std::Error;
 
 /// Represent the underlying storage type for the RpmSpeed
@@ -28,10 +29,10 @@ fn from_rpm_speed(speed: RpmSpeed) -> f32 {
 /// let underlying_speed: f32 = rpm.into();
 /// assert_eq!(underlying_speed, 500.2f32);
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Rpm<const MAX_SPEED: RpmSpeed> {
     /// The maximum speed this RPM value can represent.
-    pub max_speed: u32,
+    max_speed: u32,
 
     /// The raw speed value being represented.
     /// Speeds are stored as 100 x speed as u32s to gain
@@ -129,5 +130,24 @@ mod tests {
         assert_eq!(from_rpm_speed(300_80), 300.8f32);
         assert_eq!(from_rpm_speed(100_00), 100f32);
         assert_eq!(from_rpm_speed(100_53), 100.53f32);
+    }
+
+    #[test]
+    fn test_rpm_serialization() {
+        let rpm: Rpm<2000> = Rpm::try_from(1000.55f32).expect("Failed to get RPM representation");
+
+        let rpm_ser = postcard::to_vec::<Rpm<_>, 64>(&rpm).expect("Failed to serialize RPM");
+
+        let rpm_deser =
+            postcard::from_bytes::<Rpm<_>>(&rpm_ser).expect("Failed to deserialize RPM");
+
+        assert_eq!(
+            rpm_deser.max_speed,
+            to_rpm_speed(2000f32).expect("Failed to convert to RPM format.")
+        );
+        assert_eq!(
+            rpm_deser.speed_raw,
+            to_rpm_speed(1000.55f32).expect("Failed to convert to RPM format.")
+        );
     }
 }
