@@ -1,3 +1,5 @@
+use core::fmt::Display;
+
 use serde::{Deserialize, Serialize};
 use thiserror_no_std::Error;
 
@@ -20,19 +22,17 @@ fn from_rpm_speed(speed: RpmSpeed) -> f32 {
 }
 
 /// Store physical unit value of Rotations Per Minute (RPM).
-/// Generic parameter to specify maximum speed.
-/// Use Into<f32> to recover the speed value.
 ///
 /// ```
 /// use common::physical::rpm::Rpm;
-/// let rpm: Rpm<2000> = Rpm::try_from(500.2f32).expect("Failed to get RPM representation.");
-/// let underlying_speed: f32 = rpm.into();
+/// let rpm: Rpm = Rpm::new(2000f32, 500.2f32).expect("Failed to get RPM representation.");
+/// let underlying_speed: f32 = rpm.speed();
 /// assert_eq!(underlying_speed, 500.2f32);
 /// ```
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Rpm<const MAX_SPEED: RpmSpeed> {
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+pub struct Rpm {
     /// The maximum speed this RPM value can represent.
-    max_speed: u32,
+    max_speed_raw: u32,
 
     /// The raw speed value being represented.
     /// Speeds are stored as 100 x speed as u32s to gain
@@ -51,30 +51,45 @@ pub enum RpmError {
     OutOfValidStateSpace,
 }
 
-impl<const MAX_SPEED: RpmSpeed> Rpm<MAX_SPEED> {
+impl Rpm {
     /// Private method for creating new RPM types.
-    fn new(speed: f32) -> Self {
-        Self {
-            max_speed: to_rpm_speed(MAX_SPEED as f32).unwrap(),
-            speed_raw: (speed * 100f32) as u32,
-        }
-    }
-}
+    pub fn new(max_speed: f32, speed: f32) -> Result<Self, RpmError> {
+        let max_speed = match to_rpm_speed(max_speed) {
+            None => return Err(RpmError::OutOfValidStateSpace),
+            Some(rpm_speed) => rpm_speed,
+        };
+        let current_speed = match to_rpm_speed(speed) {
+            None => return Err(RpmError::OutOfValidStateSpace),
+            Some(rpm_speed) => rpm_speed,
+        };
 
-impl<const MAX_SPEED: RpmSpeed> Into<f32> for Rpm<MAX_SPEED> {
-    fn into(self) -> f32 {
+        if current_speed > max_speed {
+            return Err(RpmError::OutOfValidStateSpace);
+        }
+        Ok(Self {
+            max_speed_raw: max_speed,
+            speed_raw: current_speed,
+        })
+    }
+
+    pub fn max_speed(&self) -> f32 {
+        from_rpm_speed(self.max_speed_raw)
+    }
+
+    pub fn speed(&self) -> f32 {
         from_rpm_speed(self.speed_raw)
     }
 }
 
-impl<const MAX_SPEED: RpmSpeed> TryFrom<f32> for Rpm<MAX_SPEED> {
-    type Error = RpmError;
+impl Display for Rpm {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "<Rpm: {}/{} RPM>", self.speed(), self.max_speed())
+    }
+}
 
-    fn try_from(value: f32) -> Result<Self, Self::Error> {
-        if to_rpm_speed(value) > to_rpm_speed(MAX_SPEED as f32) || to_rpm_speed(value).is_none() {
-            return Err(RpmError::OutOfValidStateSpace);
-        }
-        Ok(Self::new(value))
+impl Into<f32> for Rpm {
+    fn into(self) -> f32 {
+        from_rpm_speed(self.speed_raw)
     }
 }
 
@@ -83,32 +98,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_from_f32() {
-        let rpm: Result<Rpm<2300>, RpmError> = Rpm::try_from(4000f32);
+    fn test_new() {
+        let rpm: Result<Rpm, RpmError> = Rpm::new(2300f32, 4000f32);
         assert!(rpm.is_err());
 
-        let rpm: Result<Rpm<2300>, RpmError> = Rpm::try_from(2300f32);
+        let rpm: Result<Rpm, RpmError> = Rpm::new(2300f32, 2300f32);
         assert!(rpm.is_ok());
 
         let rpm: f32 = rpm.unwrap().into();
         assert_eq!(rpm, 2300f32);
 
-        let rpm: Result<Rpm<1200>, RpmError> = Rpm::try_from(-500f32);
+        let rpm: Result<Rpm, RpmError> = Rpm::new(2300f32, -500f32);
         assert!(rpm.is_err());
     }
 
     #[test]
     fn test_into_f32() {
-        let rpm: Rpm<2300> = Rpm::try_from(2000f32).expect("Failed to get RPM representation.");
+        let rpm = Rpm::new(2300f32, 2000f32).expect("Failed to get RPM representation.");
         let speed: f32 = rpm.into();
 
         assert_eq!(speed, 2000f32);
 
-        let rpm: Rpm<100> = Rpm::try_from(50.01f32).expect("Failed to get RPM representation.");
+        let rpm = Rpm::new(100f32, 50.01f32).expect("Failed to get RPM representation.");
         let speed: f32 = rpm.into();
         assert_eq!(speed, 50.01f32);
 
-        let rpm: Rpm<10000> = Rpm::try_from(3250.20f32).expect("Failed to get RPM representation.");
+        let rpm = Rpm::new(5000f32, 3250.20f32).expect("Failed to get RPM representation.");
         let speed: f32 = rpm.into();
         assert_eq!(speed, 3250.20f32);
     }
@@ -134,15 +149,14 @@ mod tests {
 
     #[test]
     fn test_rpm_serialization() {
-        let rpm: Rpm<2000> = Rpm::try_from(1000.55f32).expect("Failed to get RPM representation");
+        let rpm = Rpm::new(2000f32, 1000.55f32).expect("Failed to get RPM representation");
 
-        let rpm_ser = postcard::to_vec::<Rpm<_>, 64>(&rpm).expect("Failed to serialize RPM");
+        let rpm_ser = postcard::to_vec::<Rpm, 64>(&rpm).expect("Failed to serialize RPM");
 
-        let rpm_deser =
-            postcard::from_bytes::<Rpm<_>>(&rpm_ser).expect("Failed to deserialize RPM");
+        let rpm_deser = postcard::from_bytes::<Rpm>(&rpm_ser).expect("Failed to deserialize RPM");
 
         assert_eq!(
-            rpm_deser.max_speed,
+            rpm_deser.max_speed_raw,
             to_rpm_speed(2000f32).expect("Failed to convert to RPM format.")
         );
         assert_eq!(
