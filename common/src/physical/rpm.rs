@@ -1,4 +1,4 @@
-use core::fmt::Display;
+use core::{fmt::Display, marker::PhantomData};
 
 use serde::{Deserialize, Serialize};
 use thiserror_no_std::Error;
@@ -39,6 +39,11 @@ pub struct Rpm {
     /// more precision without floating point math.
     /// E.g. 250.5 RPM is stored as 25050u32
     speed_raw: u32,
+
+    /// Make sure this can't be constructed with struct literals.
+    /// This ensures that state space representation boundaries aren't
+    /// circumvented.
+    _private: PhantomData<()>,
 }
 
 /// Represents errors in creating or using the RPM type.
@@ -52,7 +57,9 @@ pub enum RpmError {
 }
 
 impl Rpm {
-    /// Private method for creating new RPM types.
+    /// Construct a RPM given a max and current speed.
+    /// Will return `OutOfValidStateSpace` if RPM is negative or above
+    /// maximum.
     pub fn new(max_speed: f32, speed: f32) -> Result<Self, RpmError> {
         let max_speed = match to_rpm_speed(max_speed) {
             None => return Err(RpmError::OutOfValidStateSpace),
@@ -69,13 +76,18 @@ impl Rpm {
         Ok(Self {
             max_speed_raw: max_speed,
             speed_raw: current_speed,
+            _private: PhantomData,
         })
     }
 
+    /// Get the maximum speed that this RPM can represent.
+    /// Converts from the underlying storage type.
     pub fn max_speed(&self) -> f32 {
         from_rpm_speed(self.max_speed_raw)
     }
 
+    /// Get the current speed that this RPM does represent.
+    /// Converts from the underlying storage type.
     pub fn speed(&self) -> f32 {
         from_rpm_speed(self.speed_raw)
     }
