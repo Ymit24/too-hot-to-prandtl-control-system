@@ -4,6 +4,15 @@ use serde::{Deserialize, Serialize};
 use thiserror_no_std::Error;
 
 /// Store physical unit value of Voltage.
+///
+/// ```
+/// use common::physical::Voltage;
+/// let voltage: Voltage = Voltage::new(3.3f32, 1.8f32)
+///     .expect("Failed to get Voltage representation");
+/// let underlying_value: f32 = voltage.value();
+/// assert_eq!(underlying_value, 1.8f32);
+/// ```
+#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
 pub struct Voltage {
     max: f32,
     value: f32,
@@ -75,11 +84,29 @@ mod tests {
         assert_eq!(voltage.value(), 4.99f32);
         assert_eq!(voltage.max(), 5f32);
 
+        let voltage: Voltage =
+            Voltage::new(3.3f32, 1.8f32).expect("Failed to create valid voltage.");
+        assert_eq!(voltage.value(), 1.8f32);
+        assert_eq!(voltage.max(), 3.3f32);
+
         let voltage: Voltage = Voltage::new(5f32, 5f32).expect("Failed to create valid voltage.");
         assert_eq!(voltage.value(), 5f32);
         assert_eq!(voltage.max(), 5f32);
 
         let voltage: Result<Voltage, VoltageError> = Voltage::new(5f32, 5.01f32);
         assert!(voltage.is_err());
+    }
+
+    #[test]
+    fn test_serialization() {
+        let voltage = Voltage::new(3.3f32, 1.8f32).expect("Failed to create valid voltage");
+
+        let voltage_ser =
+            postcard::to_vec::<Voltage, 64>(&voltage).expect("Failed to serialize Voltage.");
+        let voltage_derser =
+            postcard::from_bytes::<Voltage>(&voltage_ser).expect("Failed to deserialize Voltage");
+
+        assert_eq!(voltage_derser.value(), 1.8f32);
+        assert_eq!(voltage_derser.max(), 3.3f32);
     }
 }

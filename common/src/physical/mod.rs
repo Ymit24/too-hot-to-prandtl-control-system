@@ -1,2 +1,5 @@
-pub mod rpm;
-pub mod voltage;
+mod rpm;
+mod voltage;
+
+pub use rpm::*;
+pub use voltage::*;

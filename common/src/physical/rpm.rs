@@ -24,7 +24,7 @@ fn from_rpm_speed(speed: RpmSpeed) -> f32 {
 /// Store physical unit value of Rotations Per Minute (RPM).
 ///
 /// ```
-/// use common::physical::rpm::Rpm;
+/// use common::physical::Rpm;
 /// let rpm: Rpm = Rpm::new(2000f32, 500.2f32).expect("Failed to get RPM representation.");
 /// let underlying_speed: f32 = rpm.speed();
 /// assert_eq!(underlying_speed, 500.2f32);
