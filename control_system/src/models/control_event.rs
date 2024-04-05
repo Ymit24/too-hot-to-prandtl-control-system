@@ -1,12 +1,14 @@
-use super::{rpm::Rpm, voltage::Voltage};
-use common::packet::{Packet, ReportControlTargetsPacket, ValveState};
+use common::{
+    packet::{Packet, ReportControlTargetsPacket, ValveState},
+    physical::Percentage,
+};
 use std::fmt::Display;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ControlEvent {
-    pub fan_speed: Rpm<2300>, // NOTE: placeholder
-    pub pump_pwm: Voltage<5>, // NOTE: placeholder
+    pub fan_activation: Percentage,  // NOTE: placeholder
+    pub pump_activation: Percentage, // NOTE: placeholder
     pub valve_state: ValveState,
     pub debug_command: bool, // NOTE: THIS IS A DEBUG COMMAND
 }
@@ -22,7 +24,7 @@ impl Display for ControlEvent {
         write!(
             f,
             "<Control Event | fan_speed:{}, pump_pwm:{}>",
-            self.fan_speed, self.pump_pwm
+            self.fan_activation, self.pump_activation
         )
     }
 }
@@ -32,8 +34,8 @@ impl TryFrom<ControlEvent> for Packet {
 
     fn try_from(value: ControlEvent) -> Result<Self, Self::Error> {
         Ok(Packet::ReportControlTargets(ReportControlTargetsPacket {
-            fan_control_voltage: 48000,
-            pump_control_voltage: 50 /*value.pump_pwm.into_norm()*/,
+            fan_control_percent: value.fan_activation,
+            pump_control_percent: value.pump_activation,
             valve_control_state: value.valve_state.into(),
             command: value.debug_command,
         }))

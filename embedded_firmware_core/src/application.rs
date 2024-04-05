@@ -135,7 +135,7 @@ impl<
         while let Some(packet) = self.incoming_packets.pop() {
             match packet {
                 Packet::ReportControlTargets(control_packet) => {
-                    let pump_pwm_duty_norm = (control_packet.pump_control_voltage as f32) / 100.0;
+                    let pump_pwm_duty_norm: f32 = control_packet.pump_control_percent.into();
                     let pump_pwm_duty =
                         (pump_pwm_duty_norm * (self.pwm.get_max_duty() as f32)) as u32;
 

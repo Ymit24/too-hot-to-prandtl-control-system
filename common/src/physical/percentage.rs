@@ -18,7 +18,7 @@ pub type PercentageValue = I13F3;
 /// let percent = Percentage::try_from(raw).expect("Failed to get Percentage representation");
 /// assert_eq!(percent.value(), raw);
 /// ```
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct Percentage {
     value: PercentageValue,
 }
