@@ -29,7 +29,7 @@ fn from_rpm_speed(speed: RpmSpeed) -> f32 {
 /// let underlying_speed: f32 = rpm.speed();
 /// assert_eq!(underlying_speed, 500.2f32);
 /// ```
-#[derive(Debug, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
 pub struct Rpm {
     /// The maximum speed this RPM value can represent.
     max_speed_raw: u32,
