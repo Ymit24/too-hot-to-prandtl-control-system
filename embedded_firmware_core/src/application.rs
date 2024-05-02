@@ -1,5 +1,5 @@
 use bare_metal::CriticalSection;
-use common::packet::Packet;
+use common::{packet::Packet, physical::Rpm};
 use embedded_hal::{blocking::delay::DelayMs, digital::v2::OutputPin, Pwm};
 use heapless::Vec;
 use usb_device::{
@@ -112,18 +112,23 @@ impl<
     /// NOTE: Consider handling errors
     /// TODO: TEST
     pub fn report_sensors(&mut self) {
-        let pump_speed = self.padc.read_pump_sense_raw();
-        let fan_speed = self.padc.read_fan_sense_raw();
+        let pump_speed = self.padc.read_pump_sense_norm();
+        let fan_speed = self.padc.read_fan_sense_norm();
 
+        // TODO: Refactor this to be cleaner.
         if let Some(pump_speed) = pump_speed {
             if let Some(fan_speed) = fan_speed {
-                let _ = self.outgoing_packets.push(Packet::ReportSensors(
-                    common::packet::ReportSensorsPacket {
-                        pump_speed_norm: pump_speed,
-                        fan_speed_norm: fan_speed,
-                        valve_state: common::packet::ValveState::Open,
-                    },
-                ));
+                if let Ok(pump_speed_rpm) = Rpm::new(1800f32, pump_speed) {
+                    if let Ok(fan_speed_rpm) = Rpm::new(1800f32, fan_speed) {
+                        let _ = self.outgoing_packets.push(Packet::ReportSensors(
+                            common::packet::ReportSensorsPacket {
+                                pump_speed_norm: pump_speed_rpm,
+                                fan_speed_norm: fan_speed_rpm,
+                                valve_state: common::packet::ValveState::Open,
+                            },
+                        ));
+                    }
+                }
             }
         }
     }
