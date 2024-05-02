@@ -181,9 +181,9 @@ impl<
 
         // NOTE: Hardcoding Rpm max values for now.
         let pump_speed_rpm =
-            Rpm::new(2000f32, pump_speed_raw).map_err(|err| ApplicationError::RpmError(err))?;
+            Rpm::new(2000f32, pump_speed_raw * 2000f32).map_err(|err| ApplicationError::RpmError(err))?;
         let fan_speed_rpm =
-            Rpm::new(1800f32, fan_speed_raw).map_err(|err| ApplicationError::RpmError(err))?;
+            Rpm::new(1800f32, fan_speed_raw * 1800f32).map_err(|err| ApplicationError::RpmError(err))?;
 
         let _ = self.outgoing_packets.push(Packet::ReportSensors(
             common::packet::ReportSensorsPacket {

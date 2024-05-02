@@ -1,4 +1,4 @@
-use core::marker::PhantomData;
+use core::{fmt::Display, marker::PhantomData};
 use serde::{Deserialize, Serialize};
 use thiserror_no_std::Error;
 
@@ -45,5 +45,11 @@ impl Into<(bool, bool)> for ValveState {
             Self::Closed | Self::Closing => VALVE_CLOSED,
             Self::Unknown => VALVE_OPEN,
         }
+    }
+}
+
+impl Display for ValveState {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "(ValveState state={:?})", self)
     }
 }

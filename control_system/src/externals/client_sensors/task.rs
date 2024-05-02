@@ -322,7 +322,7 @@ fn handle_report_sensor_packet(
                 Ok(data) => data,
             };
 
-            trace!("Got a client sensor data packet converted.");
+            trace!("Got a client sensor data packet converted. Packet: {}", client_sensor_data);
             if let Err(e) = tx_client_sensor_data.send(client_sensor_data) {
                 return Err(e.into());
             }
