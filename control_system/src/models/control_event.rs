@@ -1,6 +1,6 @@
 use common::{
-    packet::{Packet, ReportControlTargetsPacket, ValveState},
-    physical::Percentage,
+    packet::{Packet, ReportControlTargetsPacket},
+    physical::{Percentage, ValveState},
 };
 use std::fmt::Display;
 use thiserror::Error;
@@ -35,7 +35,7 @@ impl TryFrom<ControlEvent> for Packet {
         Ok(Packet::ReportControlTargets(ReportControlTargetsPacket {
             fan_control_percent: value.fan_activation,
             pump_control_percent: value.pump_activation,
-            valve_control_state: value.valve_state.into(),
+            valve_control_state: value.valve_state,
         }))
     }
 }

@@ -1,4 +1,4 @@
-use common::{packet::ValveState, physical::Percentage};
+use common::physical::{Percentage, ValveState};
 
 use crate::models::{
     client_sensor_data::ClientSensorData, control_event::ControlEvent,

@@ -11,7 +11,9 @@ use embedded_hal::adc::Channel as AdcChannel;
 use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::digital::v2::OutputPin;
 use hal::adc::Adc;
-use hal::gpio::{Alternate, Pin, B, PA04, PA05, PA06, PA07};
+use hal::gpio::{
+    Alternate, Input, Output, Pin, PullDown, PushPull, B, PA04, PA05, PA06, PA07, PA10, PA11, PA22, PA23,
+};
 use hal::pwm::{Channel, Pwm0, Pwm1};
 use panic_halt as _;
 
@@ -28,8 +30,19 @@ mod prandtladc;
 use prandtladc::*;
 
 static mut BUS_ALLOCATOR: Option<UsbBusAllocator<UsbBus>> = None;
-static mut APPLICATION: Option<Application<'static, UsbBus, Delay,  Pwm0, PrandtlPumpFanAdc>> =
-    None;
+static mut APPLICATION: Option<
+    Application<
+        'static,
+        UsbBus,
+        Delay,
+        Pwm0,
+        PrandtlPumpFanAdc,
+        Pin<PA10, Input<PullDown>>,
+        Pin<PA11, Input<PullDown>>,
+        Pin<PA22, Output<PushPull>>,
+        Pin<PA23, Output<PushPull>>,
+    >,
+> = None;
 
 fn initialize() {
     let mut peripherals = Peripherals::take().unwrap();
@@ -50,6 +63,12 @@ fn initialize() {
 
     let usb_n = bsp::pin_alias!(pins.usb_n);
     let usb_p = bsp::pin_alias!(pins.usb_p);
+
+    let valve_sense_1_pin = pins.pa10.into_pull_down_input();
+    let valve_sense_2_pin = pins.pa11.into_pull_down_input();
+
+    let valve_control_1_pin = pins.pa22.into_push_pull_output();
+    let valve_control_2_pin = pins.pa23.into_push_pull_output();
 
     // this stays
     unsafe {
@@ -89,6 +108,10 @@ fn initialize() {
             Channel::_0,
             Channel::_1,
             padc,
+            valve_sense_1_pin,
+            valve_sense_2_pin,
+            valve_control_1_pin,
+            valve_control_2_pin,
         ));
     }
 

@@ -1,7 +1,6 @@
-use fixedstr::{str64, str8};
+use fixedstr::str8;
 use serde::{Deserialize, Serialize};
-
-use crate::physical::{Percentage, Rpm};
+use crate::physical::{Percentage, Rpm, ValveState};
 
 // TODO: Impl Display for Packet
 
@@ -35,42 +34,13 @@ pub struct AcceptConnectionPacket {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ReportSensorsPacket {
     /// Normalized representation of the fan's rpm.
-    pub fan_speed_norm: Rpm,
+    pub fan_speed_rpm: Rpm,
 
     /// Normalized representation of the pump's rpm.
-    pub pump_speed_norm: Rpm,
+    pub pump_speed_rpm: Rpm,
 
     /// Valve State
     pub valve_state: ValveState,
-}
-
-/// Represents the state of the valve. The valve takes multiple seconds to
-/// change state and so this allows the control system to avoid rapidly
-/// trying to change from open/closed without letting it first finish changing.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Copy)]
-pub enum ValveState {
-    /// Valve is fully open.
-    Open,
-
-    /// Valve is fully closed.
-    Closed,
-
-    /// Valve is opening but not fully open.
-    Opening,
-
-    /// Valve is closing but not fully closed.
-    Closing,
-}
-
-impl Into<bool> for ValveState {
-    fn into(self) -> bool {
-        match self {
-            ValveState::Open => true,
-            ValveState::Opening => true,
-            ValveState::Closed => false,
-            ValveState::Closing => false,
-        }
-    }
 }
 
 /// Represents a snapshot of raw target control state. Sent from the host
@@ -87,7 +57,7 @@ pub struct ReportControlTargetsPacket {
 
     /// The valve is either instructed to begin opening or closing.
     /// Sending the state which the valve is in results in nothing happening.
-    pub valve_control_state: bool,
+    pub valve_control_state: ValveState,
 }
 
 /// Represents a diagnostic log line from the embedded hardware.
