@@ -25,7 +25,7 @@ impl TryFrom<ReportSensorsPacket> for ClientSensorData {
 
     fn try_from(value: ReportSensorsPacket) -> Result<Self, Self::Error> {
         Ok(ClientSensorData {
-            pump_speed: value.pump_speed_norm,
+            pump_speed: value.pump_speed_rpm,
         })
     }
 }

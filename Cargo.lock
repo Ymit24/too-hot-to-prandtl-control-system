@@ -461,6 +461,7 @@ dependencies = [
  "heapless",
  "postcard",
  "serde",
+ "thiserror-no-std",
  "usb-device",
  "usbd-serial",
 ]

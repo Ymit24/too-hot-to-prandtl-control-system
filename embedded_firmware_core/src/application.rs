@@ -1,6 +1,13 @@
 use bare_metal::CriticalSection;
-use common::{packet::Packet, physical::Rpm};
-use embedded_hal::{blocking::delay::DelayMs, digital::v2::OutputPin, Pwm};
+use common::{
+    packet::{Packet, ValveState},
+    physical::Rpm,
+};
+use embedded_hal::{
+    blocking::delay::DelayMs,
+    digital::v2::{InputPin, OutputPin},
+    Pwm,
+};
 use heapless::Vec;
 use usb_device::{
     bus::UsbBus,
@@ -9,13 +16,24 @@ use usb_device::{
 };
 use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
-use crate::PrandtlAdc;
+use crate::{ApplicationError, PrandtlAdc};
 
-pub struct Application<'a, B: UsbBus, D: DelayMs<u16>, P1: Pwm, PAdc: PrandtlAdc> {
+pub struct Application<
+    'a,
+    B: UsbBus,
+    D: DelayMs<u16>,
+    P1: Pwm,
+    PAdc: PrandtlAdc,
+    ValveStateOpenPin: InputPin,
+    ValveStateClosePin: InputPin,
+> {
     pub serial_port: SerialPort<'a, B>,
     pub usb_device: UsbDevice<'a, B>,
 
     pub delay: D,
+
+    valve_open_pin: ValveStateOpenPin,
+    valve_close_pin: ValveStateClosePin,
 
     pwm: P1,
     pump_pwm_channel: P1::Channel,
@@ -38,7 +56,9 @@ impl<
         D: DelayMs<u16>,
         P1: Pwm<Channel = impl Clone, Duty = u32>,
         PAdc: PrandtlAdc,
-    > Application<'a, B, D, P1, PAdc>
+        ValveStateOpenPin: InputPin,
+        ValveStateClosePin: InputPin,
+    > Application<'a, B, D, P1, PAdc, ValveStateOpenPin, ValveStateClosePin>
 {
     pub fn new(
         bus_allocator: &'a UsbBusAllocator<B>,
@@ -47,6 +67,8 @@ impl<
         pump_channel: P1::Channel,
         fan_channel: P1::Channel,
         padc: PAdc,
+        valve_open_pin: ValveStateOpenPin,
+        valve_close_pin: ValveStateClosePin,
     ) -> Self {
         pump_pwm.enable(pump_channel.clone());
         pump_pwm.enable(fan_channel.clone());
@@ -74,6 +96,8 @@ impl<
                 .device_class(USB_CLASS_CDC)
                 .build(),
             delay,
+            valve_open_pin,
+            valve_close_pin,
             pwm: pump_pwm,
             pump_pwm_channel: pump_channel,
             fan_pwm_channel: fan_channel,
@@ -100,34 +124,55 @@ impl<
         if self.sensor_poll_timer > 5 {
             self.sensor_poll_timer -= 5;
 
-            self.report_sensors();
+            // NOTE: Ignoring errors.
+            let _ = self.report_sensors();
         }
     }
 
-    /// Create and push report sensor packet to outgoing packets queue.
-    /// NOTE: Consider handling errors
+    /// Poll the binary state of each valve sense pin.
     /// TODO: TEST
-    pub fn report_sensors(&mut self) {
-        let pump_speed = self.padc.read_pump_sense_norm();
-        let fan_speed = self.padc.read_fan_sense_norm();
+    fn poll_valve_state_pins(&self) -> Result<(bool, bool), ApplicationError> {
+        let is_open_high = self
+            .valve_open_pin
+            .is_high()
+            .map_err(|_| ApplicationError::ValveReadFailure)?;
+        let is_close_high = self
+            .valve_close_pin
+            .is_high()
+            .map_err(|_| ApplicationError::ValveReadFailure)?;
+        Ok((is_open_high, is_close_high))
+    }
 
-        // TODO: Refactor this to be cleaner.
-        if let Some(pump_speed) = pump_speed {
-            if let Some(fan_speed) = fan_speed {
-                // NOTE: Hardcoding Rpm max values for now.
-                if let Ok(pump_speed_rpm) = Rpm::new(2000f32, pump_speed) {
-                    if let Ok(fan_speed_rpm) = Rpm::new(1800f32, fan_speed) {
-                        let _ = self.outgoing_packets.push(Packet::ReportSensors(
-                            common::packet::ReportSensorsPacket {
-                                pump_speed_norm: pump_speed_rpm,
-                                fan_speed_norm: fan_speed_rpm,
-                                valve_state: common::packet::ValveState::Open,
-                            },
-                        ));
-                    }
-                }
-            }
-        }
+    /// Create and push report sensor packet to outgoing packets queue.
+    /// TODO: TEST
+    pub fn report_sensors(&mut self) -> Result<(), ApplicationError> {
+        let pump_speed_raw = match self.padc.read_pump_sense_norm() {
+            None => return Err(ApplicationError::ReadAdcFailure),
+            Some(raw) => raw,
+        };
+        let fan_speed_raw = match self.padc.read_fan_sense_norm() {
+            None => return Err(ApplicationError::ReadAdcFailure),
+            Some(raw) => raw,
+        };
+
+        let valve_state_raw = self.poll_valve_state_pins()?;
+        let valve_state = ValveState::from(valve_state_raw);
+
+        // NOTE: Hardcoding Rpm max values for now.
+        let pump_speed_rpm =
+            Rpm::new(2000f32, pump_speed_raw).map_err(|err| ApplicationError::RpmError(err))?;
+        let fan_speed_rpm =
+            Rpm::new(1800f32, fan_speed_raw).map_err(|err| ApplicationError::RpmError(err))?;
+
+        let _ = self.outgoing_packets.push(Packet::ReportSensors(
+            common::packet::ReportSensorsPacket {
+                pump_speed_rpm,
+                fan_speed_rpm,
+                valve_state,
+            },
+        ));
+
+        Ok(())
     }
 
     /// Clear the incoming packet queue and process each packet.

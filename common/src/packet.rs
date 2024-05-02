@@ -1,5 +1,8 @@
+use core::marker::PhantomData;
+
 use fixedstr::{str64, str8};
 use serde::{Deserialize, Serialize};
+use thiserror_no_std::Error;
 
 use crate::physical::{Percentage, Rpm};
 
@@ -35,10 +38,10 @@ pub struct AcceptConnectionPacket {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ReportSensorsPacket {
     /// Normalized representation of the fan's rpm.
-    pub fan_speed_norm: Rpm,
+    pub fan_speed_rpm: Rpm,
 
     /// Normalized representation of the pump's rpm.
-    pub pump_speed_norm: Rpm,
+    pub pump_speed_rpm: Rpm,
 
     /// Valve State
     pub valve_state: ValveState,
@@ -60,15 +63,19 @@ pub enum ValveState {
 
     /// Valve is closing but not fully closed.
     Closing,
+
+    /// Valve is in an unknown state. 
+    /// Likely an invalid combination of hi/lo for the sense pins.
+    Unknown,
 }
 
-impl Into<bool> for ValveState {
-    fn into(self) -> bool {
-        match self {
-            ValveState::Open => true,
-            ValveState::Opening => true,
-            ValveState::Closed => false,
-            ValveState::Closing => false,
+impl From<(bool, bool)> for ValveState {
+
+    fn from(value: (bool, bool)) -> Self {
+        match value {
+            (true, false) => Self::Open,
+            (false, true) => Self::Closed,
+            _ => Self::Unknown
         }
     }
 }
@@ -87,7 +94,7 @@ pub struct ReportControlTargetsPacket {
 
     /// The valve is either instructed to begin opening or closing.
     /// Sending the state which the valve is in results in nothing happening.
-    pub valve_control_state: bool,
+    pub valve_control_state: ValveState,
 }
 
 /// Represents a diagnostic log line from the embedded hardware.
