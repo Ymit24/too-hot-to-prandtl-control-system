@@ -3,7 +3,6 @@
 
 use arduino_mkrzero as bsp;
 use bsp::hal;
-use bsp::pins::Led;
 use common::packet::Packet;
 use cortex_m::peripheral::NVIC;
 use embedded_firmware_core::application::Application;
@@ -29,7 +28,7 @@ mod prandtladc;
 use prandtladc::*;
 
 static mut BUS_ALLOCATOR: Option<UsbBusAllocator<UsbBus>> = None;
-static mut APPLICATION: Option<Application<'static, UsbBus, Delay, Led, Pwm0, PrandtlPumpFanAdc>> =
+static mut APPLICATION: Option<Application<'static, UsbBus, Delay,  Pwm0, PrandtlPumpFanAdc>> =
     None;
 
 fn initialize() {
@@ -42,7 +41,6 @@ fn initialize() {
         &mut peripherals.NVMCTRL,
     );
     let pins = bsp::pins::Pins::new(peripherals.PORT);
-    let mut led = bsp::pin_alias!(pins.led).into_push_pull_output();
     let mut delay = Delay::new(core.SYST, &mut clocks);
 
     // Setup the fan & pump pwm pins
@@ -87,7 +85,6 @@ fn initialize() {
         APPLICATION = Some(Application::new(
             BUS_ALLOCATOR.as_ref().unwrap(),
             delay,
-            led,
             pump_pwm,
             Channel::_0,
             Channel::_1,

@@ -10,7 +10,6 @@ pub struct ControlEvent {
     pub fan_activation: Percentage,  // NOTE: placeholder
     pub pump_activation: Percentage, // NOTE: placeholder
     pub valve_state: ValveState,
-    pub debug_command: bool, // NOTE: THIS IS A DEBUG COMMAND
 }
 
 #[derive(Error, Debug)]
@@ -37,7 +36,6 @@ impl TryFrom<ControlEvent> for Packet {
             fan_control_percent: value.fan_activation,
             pump_control_percent: value.pump_activation,
             valve_control_state: value.valve_state.into(),
-            command: value.debug_command,
         }))
     }
 }
