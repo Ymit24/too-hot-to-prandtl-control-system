@@ -37,6 +37,22 @@ impl From<(bool, bool)> for ValveState {
     }
 }
 
+impl TryFrom<f32> for ValveState {
+    type Error = PhantomData<()>;
+
+    fn try_from(value: f32) -> Result<Self, Self::Error> {
+        if value.is_sign_negative() || value > 1f32 {
+            return Err(PhantomData);
+        }
+
+        if value < 0.5f32 {
+            Ok(ValveState::Closed)
+        } else {
+            Ok(ValveState::Open)
+        }
+    }
+}
+
 impl Into<(bool, bool)> for ValveState {
     /// Note: will default to open if in the unknown state
     fn into(self) -> (bool, bool) {

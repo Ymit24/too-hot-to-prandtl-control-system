@@ -13,6 +13,12 @@ pub enum TemperatureError {
     TooHigh,
 }
 
+impl Into<f32> for Temperature {
+    fn into(self) -> f32 {
+        self.value
+    }
+}
+
 impl TryFrom<f32> for Temperature {
     type Error = TemperatureError;
 

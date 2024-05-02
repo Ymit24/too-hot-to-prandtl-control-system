@@ -18,7 +18,7 @@ pub enum CurveError {
     Empty,
 }
 
-impl<X: Clone + Copy + Into<f32>, Y: Clone + Copy + Into<f32> + From<f32>> Curve<X, Y> {
+impl<X: Clone + Copy + Into<f32>, Y: Clone + Copy + Into<f32> + TryFrom<f32>> Curve<X, Y> {
     /// Create a new curve from a set of control points.
     /// This curve must not be empty.
     pub fn new(points: Vec<(X, Y)>) -> Result<Self, CurveError> {
@@ -34,7 +34,7 @@ impl<X: Clone + Copy + Into<f32>, Y: Clone + Copy + Into<f32> + From<f32>> Curve
     /// Perform a linear interpolation to determine the value for a given x.
     /// This will clamp to the lowest value if `x` is lower than the lowest control point.
     /// This will clamp to the highest value if `x` is higher than the highest control point.
-    pub fn lookup(&self, x: X) -> Y {
+    pub fn lookup(&self, x: X) -> Option<Y> {
         let xy1 = self.find_last_point_before_x(x.clone()).unwrap();
         let xy2 = self.find_first_point_after_x(x.clone()).unwrap();
 
@@ -45,10 +45,13 @@ impl<X: Clone + Copy + Into<f32>, Y: Clone + Copy + Into<f32> + From<f32>> Curve
         let y2: f32 = xy2.1.into();
 
         if x1 == x2 {
-            return y1.into();
+            return Some(xy1.1);
         }
 
-        (y1 + (y2 - y1) * ((x.into() - x1) / (x2 - x1))).into()
+        match Y::try_from(y1 + (y2 - y1) * ((x.into() - x1) / (x2 - x1))) {
+            Err(_) => None,
+            Ok(value) => Some(value),
+        }
     }
 
     /// Find the last point before `x` or the earliest point.
@@ -135,12 +138,12 @@ mod tests {
         let points = vec![(0f32, 0f32), (3f32, 3f32), (10f32, 10f32)];
         let curve = Curve::new(points).unwrap();
 
-        assert_eq!(curve.lookup(-3f32), 0f32);
-        assert_eq!(curve.lookup(0f32), 0f32);
-        assert_eq!(curve.lookup(1f32), 1f32);
-        assert_eq!(curve.lookup(3f32), 3f32);
-        assert_eq!(curve.lookup(10f32), 10f32);
-        assert_eq!(curve.lookup(100f32), 10f32);
+        assert_eq!(curve.lookup(-3f32).expect("Failed to lookup value"), 0f32);
+        assert_eq!(curve.lookup(0f32).expect("Failed to lookup value"), 0f32);
+        assert_eq!(curve.lookup(1f32).expect("Failed to lookup value"), 1f32);
+        assert_eq!(curve.lookup(3f32).expect("Failed to lookup value"), 3f32);
+        assert_eq!(curve.lookup(10f32).expect("Failed to lookup value"), 10f32);
+        assert_eq!(curve.lookup(100f32).expect("Failed to lookup value"), 10f32);
     }
 
     #[derive(Copy, Clone, PartialEq, PartialOrd)]
@@ -174,11 +177,29 @@ mod tests {
 
         let curve = Curve::new(points).unwrap();
 
-        assert_eq!(curve.lookup(0f32.into()), 10f32);
-        assert_eq!(curve.lookup(30f32.into()), 10f32);
-        assert_eq!(curve.lookup(45f32.into()), 30f32);
-        assert_eq!(curve.lookup(60f32.into()), 50f32);
-        assert_eq!(curve.lookup(70f32.into()), 75f32);
-        assert_eq!(curve.lookup(80f32.into()), 100f32);
+        assert_eq!(
+            curve.lookup(0f32.into()).expect("Failed to lookup value"),
+            10f32
+        );
+        assert_eq!(
+            curve.lookup(30f32.into()).expect("Failed to lookup value"),
+            10f32
+        );
+        assert_eq!(
+            curve.lookup(45f32.into()).expect("Failed to lookup value"),
+            30f32
+        );
+        assert_eq!(
+            curve.lookup(60f32.into()).expect("Failed to lookup value"),
+            50f32
+        );
+        assert_eq!(
+            curve.lookup(70f32.into()).expect("Failed to lookup value"),
+            75f32
+        );
+        assert_eq!(
+            curve.lookup(80f32.into()).expect("Failed to lookup value"),
+            100f32
+        );
     }
 }

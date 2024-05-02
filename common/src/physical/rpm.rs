@@ -105,6 +105,17 @@ impl Into<f32> for Rpm {
     }
 }
 
+impl TryFrom<f32> for Rpm {
+    type Error = RpmError;
+
+    fn try_from(value: f32) -> Result<Self, Self::Error> {
+        if value.is_sign_negative() {
+            return Err(RpmError::OutOfValidStateSpace);
+        }
+        Rpm::new(1f32, value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
