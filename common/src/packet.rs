@@ -1,6 +1,8 @@
 use fixedstr::{str64, str8};
 use serde::{Deserialize, Serialize};
 
+use crate::physical::{Percentage, Rpm};
+
 // TODO: Impl Display for Packet
 
 /// Used to communicate with embedded hardware.
@@ -33,10 +35,10 @@ pub struct AcceptConnectionPacket {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct ReportSensorsPacket {
     /// Normalized representation of the fan's rpm.
-    pub fan_speed_norm: u16,
+    pub fan_speed_norm: Rpm,
 
     /// Normalized representation of the pump's rpm.
-    pub pump_speed_norm: u16,
+    pub pump_speed_norm: Rpm,
 
     /// Valve State
     pub valve_state: ValveState,
@@ -77,11 +79,11 @@ impl Into<bool> for ValveState {
 pub struct ReportControlTargetsPacket {
     /// The voltage value which the embedded hardware should immediately output
     /// for the fan.
-    pub fan_control_voltage: u32,
+    pub fan_control_percent: Percentage,
 
     /// The voltage value which the embedded hardware should immediately output
     /// for the pump.
-    pub pump_control_voltage: u32,
+    pub pump_control_percent: Percentage,
 
     /// The valve is either instructed to begin opening or closing.
     /// Sending the state which the valve is in results in nothing happening.

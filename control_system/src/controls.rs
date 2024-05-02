@@ -1,11 +1,4 @@
-use std::{
-    cell::{Cell, RefCell},
-    sync::Arc,
-    time::Instant,
-};
-
-use common::packet::ValveState;
-use once_cell::sync::OnceCell;
+use common::{packet::ValveState, physical::Percentage};
 
 use crate::models::{
     client_sensor_data::ClientSensorData, control_event::ControlEvent,
@@ -20,8 +13,8 @@ pub fn generate_control_frame(
     let state = rand::random();
     tracing::info!("Current led state: {}", state);
     ControlEvent {
-        fan_speed: crate::models::rpm::Rpm { value: 1250 },
-        pump_pwm: crate::models::voltage::Voltage { value: 5f32 },
+        fan_activation: 100f32.try_into().expect("Failed to get percentage."),
+        pump_activation: 50f32.try_into().expect("Failed to get percentage."),
         valve_state: ValveState::Open,
         debug_command: state,
     }
@@ -29,19 +22,7 @@ pub fn generate_control_frame(
 
 #[cfg(test)]
 mod testing {
-    use crate::models::{rpm::Rpm, temperature::Temperature, voltage::Voltage};
+    use crate::models::{rpm::Rpm, temperature::Temperature};
 
     use super::*;
-
-    #[test]
-    fn test_generate_control_frame() {
-        let client = ClientSensorData {
-            pump_speed: Rpm::try_from(3100).expect("Failed to generate rpm"),
-        };
-        let host = HostSensorData {
-            cpu_temperature: Temperature::try_from(70f32).expect("Failed to generate temperature"),
-        };
-
-        let _results = generate_control_frame(client, host);
-    }
 }

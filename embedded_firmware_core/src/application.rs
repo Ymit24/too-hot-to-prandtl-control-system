@@ -1,5 +1,5 @@
 use bare_metal::CriticalSection;
-use common::packet::Packet;
+use common::{packet::Packet, physical::Rpm};
 use embedded_hal::{blocking::delay::DelayMs, digital::v2::OutputPin, Pwm};
 use heapless::Vec;
 use usb_device::{
@@ -112,18 +112,24 @@ impl<
     /// NOTE: Consider handling errors
     /// TODO: TEST
     pub fn report_sensors(&mut self) {
-        let pump_speed = self.padc.read_pump_sense_raw();
-        let fan_speed = self.padc.read_fan_sense_raw();
+        let pump_speed = self.padc.read_pump_sense_norm();
+        let fan_speed = self.padc.read_fan_sense_norm();
 
+        // TODO: Refactor this to be cleaner.
         if let Some(pump_speed) = pump_speed {
             if let Some(fan_speed) = fan_speed {
-                let _ = self.outgoing_packets.push(Packet::ReportSensors(
-                    common::packet::ReportSensorsPacket {
-                        pump_speed_norm: pump_speed,
-                        fan_speed_norm: fan_speed,
-                        valve_state: common::packet::ValveState::Open,
-                    },
-                ));
+                // NOTE: Hardcoding Rpm max values for now.
+                if let Ok(pump_speed_rpm) = Rpm::new(2000f32, pump_speed) {
+                    if let Ok(fan_speed_rpm) = Rpm::new(1800f32, fan_speed) {
+                        let _ = self.outgoing_packets.push(Packet::ReportSensors(
+                            common::packet::ReportSensorsPacket {
+                                pump_speed_norm: pump_speed_rpm,
+                                fan_speed_norm: fan_speed_rpm,
+                                valve_state: common::packet::ValveState::Open,
+                            },
+                        ));
+                    }
+                }
             }
         }
     }
@@ -135,14 +141,18 @@ impl<
         while let Some(packet) = self.incoming_packets.pop() {
             match packet {
                 Packet::ReportControlTargets(control_packet) => {
-                    let pump_pwm_duty_norm = (control_packet.pump_control_voltage as f32) / 100.0;
+                    let pump_pwm_duty_norm: f32 = control_packet.pump_control_percent.into();
                     let pump_pwm_duty =
                         (pump_pwm_duty_norm * (self.pwm.get_max_duty() as f32)) as u32;
+
+                    let fan_pwm_duty_norm: f32 = control_packet.fan_control_percent.into();
+                    let fan_pwm_duty =
+                        (fan_pwm_duty_norm * (self.pwm.get_max_duty() as f32)) as u32;
 
                     self.pwm
                         .set_duty(self.pump_pwm_channel.clone(), pump_pwm_duty);
                     self.pwm
-                        .set_duty(self.fan_pwm_channel.clone(), pump_pwm_duty);
+                        .set_duty(self.fan_pwm_channel.clone(), fan_pwm_duty);
 
                     // TODO: Remove debug indicator
                     let _ = self.led.set_state(control_packet.command.into());

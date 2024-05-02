@@ -80,7 +80,7 @@ fn initialize() {
     let mut pump_sense_channel = pins.pa06.into_mode::<gpio::AlternateB>();
     let mut fan_sense_channel = pins.pa07.into_mode::<gpio::AlternateB>();
 
-    let padc = PrandtlPumpFanAdc::new(adc, pump_sense_channel, fan_sense_channel);
+    let padc = PrandtlPumpFanAdc::new(adc, pump_sense_channel, fan_sense_channel, 12);
 
     // NOTE: This must happen before we enable USB interrupt.
     unsafe {
