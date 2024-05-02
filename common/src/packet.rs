@@ -88,9 +88,6 @@ pub struct ReportControlTargetsPacket {
     /// The valve is either instructed to begin opening or closing.
     /// Sending the state which the valve is in results in nothing happening.
     pub valve_control_state: bool,
-
-    /// DEBUG: Led control command
-    pub command: bool,
 }
 
 /// Represents a diagnostic log line from the embedded hardware.

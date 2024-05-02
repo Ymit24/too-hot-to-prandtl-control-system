@@ -10,13 +10,10 @@ pub fn generate_control_frame(
     host_sensor_data: HostSensorData,
 ) -> ControlEvent {
     // TODO: REMOVE THIS DEBUG CODE
-    let state = rand::random();
-    tracing::info!("Current led state: {}", state);
     ControlEvent {
         fan_activation: 100f32.try_into().expect("Failed to get percentage."),
         pump_activation: 50f32.try_into().expect("Failed to get percentage."),
         valve_state: ValveState::Open,
-        debug_command: state,
     }
 }
 

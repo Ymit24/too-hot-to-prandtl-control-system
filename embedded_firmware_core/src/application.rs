@@ -11,12 +11,11 @@ use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
 use crate::PrandtlAdc;
 
-pub struct Application<'a, B: UsbBus, D: DelayMs<u16>, L: OutputPin, P1: Pwm, PAdc: PrandtlAdc> {
+pub struct Application<'a, B: UsbBus, D: DelayMs<u16>, P1: Pwm, PAdc: PrandtlAdc> {
     pub serial_port: SerialPort<'a, B>,
     pub usb_device: UsbDevice<'a, B>,
 
     pub delay: D,
-    led: L,
 
     pwm: P1,
     pump_pwm_channel: P1::Channel,
@@ -37,15 +36,13 @@ impl<
         'a,
         B: UsbBus,
         D: DelayMs<u16>,
-        L: OutputPin,
         P1: Pwm<Channel = impl Clone, Duty = u32>,
         PAdc: PrandtlAdc,
-    > Application<'a, B, D, L, P1, PAdc>
+    > Application<'a, B, D, P1, PAdc>
 {
     pub fn new(
         bus_allocator: &'a UsbBusAllocator<B>,
         delay: D,
-        led_pin: L,
         mut pump_pwm: P1,
         pump_channel: P1::Channel,
         fan_channel: P1::Channel,
@@ -77,7 +74,6 @@ impl<
                 .device_class(USB_CLASS_CDC)
                 .build(),
             delay,
-            led: led_pin,
             pwm: pump_pwm,
             pump_pwm_channel: pump_channel,
             fan_pwm_channel: fan_channel,
@@ -153,9 +149,6 @@ impl<
                         .set_duty(self.pump_pwm_channel.clone(), pump_pwm_duty);
                     self.pwm
                         .set_duty(self.fan_pwm_channel.clone(), fan_pwm_duty);
-
-                    // TODO: Remove debug indicator
-                    let _ = self.led.set_state(control_packet.command.into());
                 }
                 _ => {}
             }
