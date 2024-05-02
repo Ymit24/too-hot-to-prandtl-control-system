@@ -1,6 +1,6 @@
 use common::{
-    packet::{Packet, ReportControlTargetsPacket, ValveState},
-    physical::Percentage,
+    packet::{Packet, ReportControlTargetsPacket},
+    physical::{Percentage, ValveState},
 };
 use std::fmt::Display;
 use thiserror::Error;

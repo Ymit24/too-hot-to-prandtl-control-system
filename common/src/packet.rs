@@ -1,10 +1,6 @@
-use core::marker::PhantomData;
-
-use fixedstr::{str64, str8};
+use fixedstr::str8;
 use serde::{Deserialize, Serialize};
-use thiserror_no_std::Error;
-
-use crate::physical::{Percentage, Rpm};
+use crate::physical::{Percentage, Rpm, ValveState};
 
 // TODO: Impl Display for Packet
 
@@ -45,39 +41,6 @@ pub struct ReportSensorsPacket {
 
     /// Valve State
     pub valve_state: ValveState,
-}
-
-/// Represents the state of the valve. The valve takes multiple seconds to
-/// change state and so this allows the control system to avoid rapidly
-/// trying to change from open/closed without letting it first finish changing.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Copy)]
-pub enum ValveState {
-    /// Valve is fully open.
-    Open,
-
-    /// Valve is fully closed.
-    Closed,
-
-    /// Valve is opening but not fully open.
-    Opening,
-
-    /// Valve is closing but not fully closed.
-    Closing,
-
-    /// Valve is in an unknown state. 
-    /// Likely an invalid combination of hi/lo for the sense pins.
-    Unknown,
-}
-
-impl From<(bool, bool)> for ValveState {
-
-    fn from(value: (bool, bool)) -> Self {
-        match value {
-            (true, false) => Self::Open,
-            (false, true) => Self::Closed,
-            _ => Self::Unknown
-        }
-    }
 }
 
 /// Represents a snapshot of raw target control state. Sent from the host

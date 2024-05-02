@@ -1,7 +1,7 @@
 use bare_metal::CriticalSection;
 use common::{
-    packet::{Packet, ValveState},
-    physical::Rpm,
+    packet::Packet,
+    physical::{Rpm, ValveState},
 };
 use embedded_hal::{
     blocking::delay::DelayMs,
@@ -24,16 +24,20 @@ pub struct Application<
     D: DelayMs<u16>,
     P1: Pwm,
     PAdc: PrandtlAdc,
-    ValveStateOpenPin: InputPin,
-    ValveStateClosePin: InputPin,
+    ValveState1Pin: InputPin,
+    ValveState2Pin: InputPin,
+    ValveControl1Pin: OutputPin,
+    ValveControl2Pin: OutputPin,
 > {
     pub serial_port: SerialPort<'a, B>,
     pub usb_device: UsbDevice<'a, B>,
 
     pub delay: D,
 
-    valve_open_pin: ValveStateOpenPin,
-    valve_close_pin: ValveStateClosePin,
+    valve_sense_1_pin: ValveState1Pin,
+    valve_sense_2_pin: ValveState2Pin,
+    valve_control_1_pin: ValveControl1Pin,
+    valve_control_2_pin: ValveControl2Pin,
 
     pwm: P1,
     pump_pwm_channel: P1::Channel,
@@ -56,9 +60,22 @@ impl<
         D: DelayMs<u16>,
         P1: Pwm<Channel = impl Clone, Duty = u32>,
         PAdc: PrandtlAdc,
-        ValveStateOpenPin: InputPin,
-        ValveStateClosePin: InputPin,
-    > Application<'a, B, D, P1, PAdc, ValveStateOpenPin, ValveStateClosePin>
+        ValveState1Pin: InputPin,
+        ValveState2Pin: InputPin,
+        ValveControl1Pin: OutputPin,
+        ValveControl2Pin: OutputPin,
+    >
+    Application<
+        'a,
+        B,
+        D,
+        P1,
+        PAdc,
+        ValveState1Pin,
+        ValveState2Pin,
+        ValveControl1Pin,
+        ValveControl2Pin,
+    >
 {
     pub fn new(
         bus_allocator: &'a UsbBusAllocator<B>,
@@ -67,8 +84,10 @@ impl<
         pump_channel: P1::Channel,
         fan_channel: P1::Channel,
         padc: PAdc,
-        valve_open_pin: ValveStateOpenPin,
-        valve_close_pin: ValveStateClosePin,
+        valve_sense_1_pin: ValveState1Pin,
+        valve_sense_2_pin: ValveState2Pin,
+        valve_control_1_pin: ValveControl1Pin,
+        valve_control_2_pin: ValveControl2Pin,
     ) -> Self {
         pump_pwm.enable(pump_channel.clone());
         pump_pwm.enable(fan_channel.clone());
@@ -96,8 +115,10 @@ impl<
                 .device_class(USB_CLASS_CDC)
                 .build(),
             delay,
-            valve_open_pin,
-            valve_close_pin,
+            valve_sense_1_pin,
+            valve_sense_2_pin,
+            valve_control_1_pin,
+            valve_control_2_pin,
             pwm: pump_pwm,
             pump_pwm_channel: pump_channel,
             fan_pwm_channel: fan_channel,
@@ -133,11 +154,11 @@ impl<
     /// TODO: TEST
     fn poll_valve_state_pins(&self) -> Result<(bool, bool), ApplicationError> {
         let is_open_high = self
-            .valve_open_pin
+            .valve_sense_1_pin
             .is_high()
             .map_err(|_| ApplicationError::ValveReadFailure)?;
         let is_close_high = self
-            .valve_close_pin
+            .valve_sense_2_pin
             .is_high()
             .map_err(|_| ApplicationError::ValveReadFailure)?;
         Ok((is_open_high, is_close_high))
@@ -190,10 +211,17 @@ impl<
                     let fan_pwm_duty =
                         (fan_pwm_duty_norm * (self.pwm.get_max_duty() as f32)) as u32;
 
+                    let valve_state = control_packet.valve_control_state;
+                    let valve_state_raw: (bool, bool) = valve_state.into();
+
                     self.pwm
                         .set_duty(self.pump_pwm_channel.clone(), pump_pwm_duty);
                     self.pwm
                         .set_duty(self.fan_pwm_channel.clone(), fan_pwm_duty);
+
+                    // NOTE: Ignore errors
+                    let _ = self.valve_control_1_pin.set_state(valve_state_raw.0.into());
+                    let _ = self.valve_control_2_pin.set_state(valve_state_raw.1.into());
                 }
                 _ => {}
             }
