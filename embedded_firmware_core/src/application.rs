@@ -118,7 +118,8 @@ impl<
         // TODO: Refactor this to be cleaner.
         if let Some(pump_speed) = pump_speed {
             if let Some(fan_speed) = fan_speed {
-                if let Ok(pump_speed_rpm) = Rpm::new(1800f32, pump_speed) {
+                // NOTE: Hardcoding Rpm max values for now.
+                if let Ok(pump_speed_rpm) = Rpm::new(2000f32, pump_speed) {
                     if let Ok(fan_speed_rpm) = Rpm::new(1800f32, fan_speed) {
                         let _ = self.outgoing_packets.push(Packet::ReportSensors(
                             common::packet::ReportSensorsPacket {
@@ -144,10 +145,14 @@ impl<
                     let pump_pwm_duty =
                         (pump_pwm_duty_norm * (self.pwm.get_max_duty() as f32)) as u32;
 
+                    let fan_pwm_duty_norm: f32 = control_packet.fan_control_percent.into();
+                    let fan_pwm_duty =
+                        (fan_pwm_duty_norm * (self.pwm.get_max_duty() as f32)) as u32;
+
                     self.pwm
                         .set_duty(self.pump_pwm_channel.clone(), pump_pwm_duty);
                     self.pwm
-                        .set_duty(self.fan_pwm_channel.clone(), pump_pwm_duty);
+                        .set_duty(self.fan_pwm_channel.clone(), fan_pwm_duty);
 
                     // TODO: Remove debug indicator
                     let _ = self.led.set_state(control_packet.command.into());
