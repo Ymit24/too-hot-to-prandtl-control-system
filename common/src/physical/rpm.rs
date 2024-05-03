@@ -1,7 +1,9 @@
-use core::{fmt::Display, marker::PhantomData};
+use core::{fmt::Display, marker::PhantomData, ops::Sub};
 
 use serde::{Deserialize, Serialize};
 use thiserror_no_std::Error;
+
+use super::Percentage;
 
 /// Represent the underlying storage type for the RpmSpeed
 type RpmSpeed = u32;
@@ -91,6 +93,26 @@ impl Rpm {
     pub fn speed(&self) -> f32 {
         from_rpm_speed(self.speed_raw)
     }
+
+    /// Subtract another RPM's value from this RPM. Keeps this RPM's max speed.
+    pub fn sub(&self, rhs: Self) -> Result<Self, RpmError> {
+        Self::new(
+            self.max_speed(),
+            from_rpm_speed(self.speed_raw) - from_rpm_speed(rhs.speed_raw),
+        )
+    }
+
+    /// Convert `RPM` into `Percentage`.
+    /// ```
+    /// use crate::common::physical::{Rpm,Percentage};
+    /// let rpm = Rpm::new(1000f32, 500f32).expect("Failed to generate RPM.");
+    /// let percentage = rpm.into_percentage();
+    /// assert_eq!(percentage, Percentage::try_from(50f32).expect("Failed to generate Percentage"));
+    /// ```
+    pub fn into_percentage(&self) -> Percentage {
+        Percentage::try_from((self.speed() / self.max_speed()) * 100f32)
+            .expect("Failed to generate Percentage.")
+    }
 }
 
 impl Display for Rpm {
@@ -102,6 +124,17 @@ impl Display for Rpm {
 impl Into<f32> for Rpm {
     fn into(self) -> f32 {
         from_rpm_speed(self.speed_raw)
+    }
+}
+
+impl TryFrom<f32> for Rpm {
+    type Error = RpmError;
+
+    fn try_from(value: f32) -> Result<Self, Self::Error> {
+        if value.is_sign_negative() {
+            return Err(RpmError::OutOfValidStateSpace);
+        }
+        Rpm::new(1f32, value)
     }
 }
 
@@ -164,7 +197,6 @@ mod tests {
         let rpm = Rpm::new(2000f32, 1000.55f32).expect("Failed to get RPM representation");
 
         let rpm_ser = postcard::to_vec::<Rpm, 64>(&rpm).expect("Failed to serialize RPM");
-
         let rpm_deser = postcard::from_bytes::<Rpm>(&rpm_ser).expect("Failed to deserialize RPM");
 
         assert_eq!(
@@ -175,5 +207,33 @@ mod tests {
             rpm_deser.speed_raw,
             to_rpm_speed(1000.55f32).expect("Failed to convert to RPM format.")
         );
+    }
+
+    #[test]
+    fn test_rpm_sub_working_cases() {
+        let rpm1 = Rpm::new(1000f32, 500f32).expect("Failed to get RPM");
+        let rpm2 = rpm1.clone();
+        let rpm3 = Rpm::new(1000f32, 250f32).expect("Failed to get RPM");
+
+        let new_rpm = rpm1.sub(rpm3);
+        assert!(new_rpm.is_ok());
+
+        let new_rpm = new_rpm.expect("Failed to subtract RPMs!");
+        assert_eq!(new_rpm.speed(), 250f32);
+
+        let new_rpm = rpm1.sub(rpm2);
+        assert!(new_rpm.is_ok());
+
+        let new_rpm = new_rpm.expect("Failed to subtract RPMs!");
+        assert_eq!(new_rpm.speed(), 0f32);
+    }
+
+    #[test]
+    fn test_rpm_sub_failing_cases() {
+        let rpm1 = Rpm::new(1000f32, 500f32).expect("Failed to get RPM");
+        let rpm2 = Rpm::new(3000f32, 2500f32).expect("Failed to get RPM");
+
+        let new_rpm = rpm1.sub(rpm2);
+        assert!(new_rpm.is_err());
     }
 }

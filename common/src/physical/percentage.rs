@@ -38,6 +38,11 @@ impl Percentage {
     pub fn value(&self) -> PercentageValue {
         self.value.clone()
     }
+
+    /// Subtract a percentage from this percentage.
+    pub fn sub(&self, rhs: Self) -> Result<Self, PercentageError> {
+        Percentage::try_from((self.value() - rhs.value()).to_num::<f32>())
+    }
 }
 
 impl TryFrom<f32> for Percentage {
@@ -83,5 +88,27 @@ pub mod tests {
 
         let percent = Percentage::try_from(105f32);
         assert!(percent.is_err());
+    }
+
+    #[test]
+    fn test_sub_working_cases() {
+        let perc1 = Percentage::try_from(50f32).expect("Failed to get Percentage.");
+        let perc2 = perc1.clone();
+        let perc3 = Percentage::try_from(25f32).expect("Failed to get Percentage.");
+
+        let new_perc = perc1.sub(perc2).expect("Failed to subtract Percentages.");
+        assert_eq!(new_perc.value(), 0);
+
+        let new_perc = perc1.sub(perc3).expect("Failed to subtract Percentages.");
+        assert_eq!(new_perc.value(), 25f32);
+    }
+
+    #[test]
+    fn test_sub_failing_cases() {
+        let perc1 = Percentage::try_from(50f32).expect("Failed to get Percentage.");
+        let perc2 = Percentage::try_from(75f32).expect("Failed to get Percentage.");
+
+        let new_perc = perc1.sub(perc2);
+        assert!(new_perc.is_err());
     }
 }
