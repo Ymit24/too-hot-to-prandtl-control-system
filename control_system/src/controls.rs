@@ -189,7 +189,7 @@ mod testing {
                 let target = target as f32;
                 let result = apply_feedback(current, target);
 
-                let correct = current + ((target - current) * PUMP_SENSITIVITY_K);
+                let correct = target + ((target - current) * PUMP_SENSITIVITY_K);
 
                 assert_eq!(result, correct);
             }
