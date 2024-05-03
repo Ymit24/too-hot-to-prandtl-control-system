@@ -37,6 +37,16 @@ impl From<(bool, bool)> for ValveState {
     }
 }
 
+impl Into<f32> for ValveState {
+    fn into(self) -> f32 {
+        match self {
+            Self::Open | Self::Opening => 1f32,
+            Self::Closed | Self::Closing => 0f32,
+            _ => 1f32,
+        }
+    }
+}
+
 impl TryFrom<f32> for ValveState {
     type Error = PhantomData<()>;
 

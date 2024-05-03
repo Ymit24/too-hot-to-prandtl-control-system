@@ -48,11 +48,20 @@ const FAN_CURVE: Lazy<Curve<Temperature, Percentage>> = Lazy::new(|| {
 
 const VALVE_CURVE: Lazy<Curve<Temperature, ValveState>> = Lazy::new(|| {
     Curve::new(vec![
-        (0f32.try_into().expect("Failed to get temperature."), 1f32),
-        (59f32.try_into().expect("Failed to get temperature."), 1f32),
-        (60f32.try_into().expect("Failed to get temperature."), 0f32),
+        (
+            0f32.try_into().expect("Failed to get temperature."),
+            ValveState::Open,
+        ),
+        (
+            59f32.try_into().expect("Failed to get temperature."),
+            ValveState::Open,
+        ),
+        (
+            60f32.try_into().expect("Failed to get temperature."),
+            ValveState::Closed,
+        ),
     ])
-    .expect("Failed to get fan curve.")
+    .expect("Failed to get valve curve.")
 });
 
 pub fn generate_control_frame(
@@ -80,11 +89,21 @@ pub fn generate_control_frame(
         }
         Some(percentage) => percentage,
     };
+    let target_valve_state = match VALVE_CURVE.lookup(temperature) {
+        None => {
+            tracing::error!(
+                "Failed to get valve value for temperature {}. Defaulting to Open!",
+                temperature
+            );
+            ValveState::Open
+        }
+        Some(percentage) => percentage,
+    };
 
     ControlEvent {
         fan_activation: target_fan_percent,
         pump_activation: target_pump_percent,
-        valve_state: ValveState::Open,
+        valve_state: target_valve_state,
     }
 }
 
