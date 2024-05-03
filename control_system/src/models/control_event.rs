@@ -22,8 +22,8 @@ impl Display for ControlEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "<Control Event | fan_speed:{}, pump_pwm:{}>",
-            self.fan_activation, self.pump_activation
+            "<Control Event | fan_speed:{}, pump_pwm:{}, valve_state:{}>",
+            self.fan_activation, self.pump_activation, self.valve_state
         )
     }
 }

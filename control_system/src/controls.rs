@@ -1,5 +1,6 @@
 use common::physical::{Percentage, Rpm, ValveState};
 use once_cell::sync::Lazy;
+use tracing::warn;
 
 use crate::models::{
     client_sensor_data::ClientSensorData, control_event::ControlEvent, curve::Curve,
@@ -74,6 +75,7 @@ pub fn generate_control_frame(
 ) -> ControlEvent {
     let temperature = host_sensor_data.cpu_temperature;
     let target_pump_percent = pump_controller(temperature, client_sensor_data.pump_speed);
+
     let target_fan_percent = match FAN_CURVE.lookup(temperature) {
         None => {
             tracing::error!(
@@ -116,7 +118,6 @@ fn pump_controller(temperature: Temperature, pump_rpm: Rpm) -> Percentage {
     };
     let raw_current_speed_percentage: f32 = pump_rpm.into_percentage().into();
     let raw_target: f32 = target_activation.into();
-
     let raw_feedback_target = apply_feedback(raw_current_speed_percentage, raw_target);
     match Percentage::try_from(raw_feedback_target) {
         Err(err) => {
@@ -130,7 +131,7 @@ fn pump_controller(temperature: Temperature, pump_rpm: Rpm) -> Percentage {
 
 /// Apply basic feedback with `PUMP_SENSITIVITY_K` parameter.
 fn apply_feedback(current: f32, target: f32) -> f32 {
-    current + ((target - current) * PUMP_SENSITIVITY_K)
+    target + ((target - current) * PUMP_SENSITIVITY_K)
 }
 
 #[cfg(test)]
