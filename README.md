@@ -2,7 +2,6 @@
 
 ## About this repo
 This repo contains all the software I wrote for my undergraduate senior design project "Too Hot To Prandtl".
-All software was written in Rust 🦀! 
 
 <!-- TABLE OF CONTENTS -->
 <div>
@@ -37,7 +36,7 @@ As the teams sole Electrical Engineer, I wrote all the software and designed, or
 The hardware for this project is hosted in a seperate repository found [here](https://github.com/Ymit24/prandtl-hardware/tree/main).
 
 ## Project Structure
-_(This section assumes you're familiar with basic rust terminology like crates!)_
+_(Here I use a workspace containing multiple crates which is Rust's terminology for a solution with multiple projects, if you're coming from a .NET background, for example.)_
 
 This project is split between two application across four crates.
 
