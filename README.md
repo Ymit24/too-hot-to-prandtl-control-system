@@ -1,7 +1,7 @@
 # ❄️🎛️ Too Hot To Prandtl Control Software
 
 ## About this repo
-This repo contains all the software I wrote for my undergraduate senior design project "Too Hot To Prandtl" (project description found [here](#project-introduction)).
+This repo contains all the software I wrote for my undergraduate senior design project "Too Hot To Prandtl".
 All software was written in Rust 🦀! 
 
 <!-- TABLE OF CONTENTS -->
