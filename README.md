@@ -38,7 +38,7 @@ The hardware for this project is hosted in a seperate repository found [here](ht
 ## Project Structure
 _(Here I use a workspace containing multiple crates which is Rust's terminology for a solution with multiple projects, if you're coming from a .NET background, for example.)_
 
-This project is split between two application across four crates.
+This project is split between two applications across four crates.
 
 | Crate | Description |
 | ----- | ----------- |
