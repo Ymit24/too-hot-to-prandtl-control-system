@@ -1,14 +1,13 @@
 use tokio::sync::broadcast::{Receiver, Sender};
 use tokio_util::sync::CancellationToken;
-use tracing::{info, instrument, warn, trace, debug, error};
+use tracing::{debug, error, info, instrument, trace, warn};
 
-use crate::models::{
-    client_sensor_data::ClientSensorData, control_event::ControlEvent,
-    host_sensor_data::HostSensorData,
-};
-
-use super::{
+use crate::{
     controls::generate_control_frame,
+    models::{
+        client_sensor_data::ClientSensorData, control_event::ControlEvent,
+        host_sensor_data::HostSensorData,
+    },
 };
 
 /// Task: Activate when a host or client sensor data is emitted.
