@@ -1,3 +1,9 @@
 [workspace]
-members = [ "common","control_system", "embedded_firmware", "embedded_firmware_core"]
+members = [
+    "common",
+    "control_system",
+    "embedded_firmware",
+    "embedded_firmware_core",
+]
 resolver = "2"
+default-members = ["common", "control_system", "embedded_firmware_core"]
